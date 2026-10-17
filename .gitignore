@@ -22,3 +22,25 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+
+# Node / React
+node_modules/
+dist/
+build/
+
+# Secrets (VERY IMPORTANT)
+.env
+.env.local
+application-local.properties
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploaded files
+uploads/
