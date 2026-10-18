@@ -231,7 +231,7 @@ A: The backend extracts text with PDFBox, splits it into chunks, selects the rel
 A: Streaming responses, embeddings for better retrieval, refresh tokens, rate limiting, caching, tests, and Docker deployment.
 
 **Q: What was the hardest bug?**
-A: *(Fill this in as you go. Real stories are your best interview material.)*
+A: My Spring Boot app started, then crashed with "declared package does not match expected package." I read the stack trace to the last `Caused by:` line and saw I had typed the Group Id as `com.docmin` instead of `com.docmind`. Renaming the folders did not update the `package` line inside each file, so I used a search command to find the leftovers, fixed them, and ran `mvnw clean` to remove old compiled files.
 
 ---
 
@@ -242,6 +242,8 @@ A: *(Fill this in as you go. Real stories are your best interview material.)*
 | 0 | `npm` blocked in PowerShell | Windows script execution policy | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 | 0 | Project inside OneDrive | OneDrive syncs thousands of `node_modules` files | Moved project to `C:\Projects` |
 | 0 | `init.defaultBranch` showed `master` and `main` | Two config levels; last one wins | Left as is, since `main` overrides |
+| 1 | Spring Initializr created `backend/backend/pom.xml` | Initializr makes its own subfolder named after the Artifact Id | Moved all files up one level with `Move-Item` and deleted the empty folder |
+| 1 | `Unresolved compilation problem: declared package does not match expected package` | Group Id typed as `com.docmin` (missing "d"), so folders and package lines did not match | Fixed groupId in pom.xml, renamed folders, updated the `package` line in each file, ran `mvnw clean` |
 
 ---
 
@@ -257,3 +259,12 @@ Copy this each time we add a tool:
 - **Why not those:**
 - **Trade-offs / Interview line:**
 ```
+
+---
+
+## 7. Daily Update Log
+
+| Day | What changed in this file |
+|---|---|
+| 0 | Created the document and recorded the Git/GitHub setup decisions |
+| 1 | Marked Spring Boot, Maven, Lombok, DevTools, Spring Web as in use; added 2 challenges |
