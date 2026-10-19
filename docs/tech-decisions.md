@@ -53,6 +53,10 @@
 | 16 | Secrets handling | Environment variables | 🔜 |
 | 17 | Frontend styling | Tailwind CSS or similar | ❓ |
 | 18 | Deployment | Docker + a cloud host | ❓ |
+| 19 | Cross-origin access | CORS config in Spring Boot | ✅ |
+| 20 | HTTP calls from React | Built-in `fetch` | ✅ |
+| 21 | Frontend language | JavaScript (JSX) | ✅ |
+| 22 | Linting | ESLint | ✅ |
 
 ---
 
@@ -211,6 +215,40 @@
 - Options: Docker + Render / Railway / AWS, or a VPS.
 - To be decided in Week 8.
 
+### 3.20 CORS configuration ✅
+- **What:** CORS (Cross-Origin Resource Sharing) is a browser rule. A page from one address (localhost:5173) may read responses from another (localhost:8080) only if that server allows it.
+- **Why we chose it:** A global `WebMvcConfigurer` allows only our React origin on `/api/**`. The rule lives in one place instead of on every controller.
+- **Alternatives:** `@CrossOrigin` on each controller, a Vite dev proxy, allowing all origins (`*`).
+- **Why not those:**
+  - *`@CrossOrigin` per controller:* Easy to forget on new controllers.
+  - *Vite proxy:* Good dev-only trick, but it hides the problem and does not exist in production.
+  - *Allow `*`:* Works, but unsafe once we use login tokens.
+- **Trade-off / note:** When we add Spring Security, CORS must also be enabled there, or login requests will be blocked.
+- **Interview line:** "CORS is enforced by the browser, not the server. My request reached Spring Boot, but the browser blocked the response until the server sent the allowed-origin header."
+
+### 3.21 fetch (built-in) vs Axios ✅
+- **What:** `fetch` is the browser's built-in way to call an API.
+- **Why we chose it:** No extra library, and it teaches how HTTP calls really work.
+- **Alternatives:** Axios, TanStack Query (React Query), SWR.
+- **Why not those:**
+  - *Axios:* Nicer syntax and automatic JSON handling, but an extra dependency. We may adopt it when we add login tokens.
+  - *TanStack Query:* Great for caching and loading states, but adds concepts. A possible upgrade later.
+
+### 3.22 JavaScript vs TypeScript ✅
+- **What:** We use plain JavaScript (JSX) for the React code.
+- **Why we chose it:** One new thing at a time, since we're already learning React and Spring Boot together.
+- **Alternatives:** TypeScript.
+- **Why not TypeScript now:** It catches many bugs and is common in jobs, but adds setup and syntax to learn. A good stretch goal to migrate to later.
+
+### 3.23 ESLint (linter) ✅
+- **What:** A tool that checks JavaScript/React code for likely mistakes and style problems as I write it.
+- **Why we chose it:** The long-standing standard in React projects, so the skill carries over to most teams and job listings.
+- **Alternatives:** Oxlint, Biome, no linter.
+- **Why not those:**
+  - *Oxlint / Biome:* Much faster and promising, but newer and less common in teams today. Speed does not matter at our project size.
+  - *No linter:* Bugs like unused variables would only show up at runtime.
+- **Interview line:** "I used ESLint so common mistakes were caught as I typed, not in the browser."
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -244,6 +282,7 @@ A: My Spring Boot app started, then crashed with "declared package does not matc
 | 0 | `init.defaultBranch` showed `master` and `main` | Two config levels; last one wins | Left as is, since `main` overrides |
 | 1 | Spring Initializr created `backend/backend/pom.xml` | Initializr makes its own subfolder named after the Artifact Id | Moved all files up one level with `Move-Item` and deleted the empty folder |
 | 1 | `Unresolved compilation problem: declared package does not match expected package` | Group Id typed as `com.docmin` (missing "d"), so folders and package lines did not match | Fixed groupId in pom.xml, renamed folders, updated the `package` line in each file, ran `mvnw clean` |
+| 2 | Browser showed "Failed to fetch" and a CORS error in the Console | Frontend (5173) and backend (8080) are different origins, and the backend did not allow 5173 | Added `WebConfig` with `addCorsMappings` allowing `http://localhost:5173` |
 
 ---
 
@@ -268,3 +307,4 @@ Copy this each time we add a tool:
 |---|---|
 | 0 | Created the document and recorded the Git/GitHub setup decisions |
 | 1 | Marked Spring Boot, Maven, Lombok, DevTools, Spring Web as in use; added 2 challenges |
+| 2 | Marked React and Vite as in use; added CORS, fetch, JavaScript, and ESLint decisions; added the CORS challenge |

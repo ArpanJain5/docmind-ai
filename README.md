@@ -19,3 +19,5 @@ An AI-powered workspace for students, developers, and office teams.
 
 ## Status
 🚧 Day 0: project setup
+🚧 Day 1: maven and dependency installation
+🚧 Day 2: React frontend connected to the Spring Boot backend
