@@ -22,3 +22,11 @@
 - Used fetch + useState + useEffect to call GET /api/hello
 - Learned: CORS is enforced by the browser. The request reached Spring Boot, but the browser blocked React from reading the response until the server allowed the origin
 - Fixed it with a WebConfig class in Spring Boot
+
+## Day 3
+- Built POST /api/chat that accepts and returns JSON
+- Learned DTOs (Java records), the Controller → Service split, and dependency injection
+- Built a chat screen in React: message list, input box, loading state, error bubble, auto-scroll
+- Moved fetch code into src/api/chatApi.js
+- Learned: test the backend alone first (Invoke-RestMethod), then connect the frontend
+- Learned: a POST with JSON triggers a CORS preflight (OPTIONS) request

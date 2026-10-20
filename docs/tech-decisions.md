@@ -57,6 +57,10 @@
 | 20 | HTTP calls from React | Built-in `fetch` | ✅ |
 | 21 | Frontend language | JavaScript (JSX) | ✅ |
 | 22 | Linting | ESLint | ✅ |
+| 23 | Data format between React and Spring | JSON | ✅ |
+| 24 | Request/response objects | Java records as DTOs | ✅ |
+| 25 | Backend structure | Controller → Service layers | ✅ |
+| 26 | Frontend state | React `useState` (no state library yet) | ✅ |
 
 ---
 
@@ -249,6 +253,36 @@
   - *No linter:* Bugs like unused variables would only show up at runtime.
 - **Interview line:** "I used ESLint so common mistakes were caught as I typed, not in the browser."
 
+### 3.24 JSON + DTOs as Java records ✅
+- **What:** React and Spring Boot exchange JSON. DTOs (`ChatRequest`, `ChatResponse`) describe the exact shape of each message. We write them as Java `record`s.
+- **Why we chose it:** A DTO makes the API contract explicit. Records are short and immutable, which fits one-way data carriers.
+- **Alternatives:** `Map<String, Object>`, database entities used directly as API objects, Lombok `@Data` classes.
+- **Why not those:**
+  - *Maps:* No type safety, so typos only fail at runtime.
+  - *Entities as API objects:* Leaks database structure (like password hashes) and couples the API to the database.
+  - *Lombok classes:* Work fine, but records need no library for simple carriers.
+- **Interview line:** "I use DTOs so the API contract is separate from the database model, and records keep them short and immutable."
+
+### 3.25 Controller → Service layering ✅
+- **What:** The controller handles HTTP (receive request, return status). The service holds the business logic.
+- **Why we chose it:** Each class has one job. The service can later call the AI API or the database without changing HTTP code, and it can be tested without a web server.
+- **Alternatives:** Everything in the controller, or heavier architectures (hexagonal / clean architecture) from day one.
+- **Why not those:**
+  - *All in controller:* Becomes unreadable once AI and database code arrive.
+  - *Full clean architecture:* Too heavy for the current size. We add structure when there is a reason.
+- **Related:** Constructor injection (Spring passes `ChatService` into the controller) instead of `@Autowired` on fields, because dependencies are explicit and easy to test.
+- **Interview line:** "The controller only deals with HTTP. The service is where the AI call will live, so swapping providers won't touch the controller."
+
+### 3.26 React state with useState ✅
+- **What:** The chat screen keeps messages, input text, and a loading flag in `useState`.
+- **Why we chose it:** The state belongs to one screen, so built-in hooks are enough.
+- **Alternatives:** Redux Toolkit, Zustand, React Context, TanStack Query.
+- **Why not those:**
+  - *Redux / Zustand:* Useful when many screens share state. We have one screen so far.
+  - *Context:* We'll likely use it for the logged-in user later.
+  - *TanStack Query:* Helpful for caching server data, a possible upgrade when we load chat history.
+- **Interview line:** "I add a state library only when state is shared across screens. Until then, useState keeps things simple."
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -283,6 +317,7 @@ A: My Spring Boot app started, then crashed with "declared package does not matc
 | 1 | Spring Initializr created `backend/backend/pom.xml` | Initializr makes its own subfolder named after the Artifact Id | Moved all files up one level with `Move-Item` and deleted the empty folder |
 | 1 | `Unresolved compilation problem: declared package does not match expected package` | Group Id typed as `com.docmin` (missing "d"), so folders and package lines did not match | Fixed groupId in pom.xml, renamed folders, updated the `package` line in each file, ran `mvnw clean` |
 | 2 | Browser showed "Failed to fetch" and a CORS error in the Console | Frontend (5173) and backend (8080) are different origins, and the backend did not allow 5173 | Added `WebConfig` with `addCorsMappings` allowing `http://localhost:5173` |
+| 3 | Added JSON/DTO, controller-service layering, and React state decisions |
 
 ---
 
