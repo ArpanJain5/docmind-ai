@@ -317,7 +317,6 @@ A: My Spring Boot app started, then crashed with "declared package does not matc
 | 1 | Spring Initializr created `backend/backend/pom.xml` | Initializr makes its own subfolder named after the Artifact Id | Moved all files up one level with `Move-Item` and deleted the empty folder |
 | 1 | `Unresolved compilation problem: declared package does not match expected package` | Group Id typed as `com.docmin` (missing "d"), so folders and package lines did not match | Fixed groupId in pom.xml, renamed folders, updated the `package` line in each file, ran `mvnw clean` |
 | 2 | Browser showed "Failed to fetch" and a CORS error in the Console | Frontend (5173) and backend (8080) are different origins, and the backend did not allow 5173 | Added `WebConfig` with `addCorsMappings` allowing `http://localhost:5173` |
-| 3 | Added JSON/DTO, controller-service layering, and React state decisions |
 
 ---
 
@@ -343,3 +342,4 @@ Copy this each time we add a tool:
 | 0 | Created the document and recorded the Git/GitHub setup decisions |
 | 1 | Marked Spring Boot, Maven, Lombok, DevTools, Spring Web as in use; added 2 challenges |
 | 2 | Marked React and Vite as in use; added CORS, fetch, JavaScript, and ESLint decisions; added the CORS challenge |
+| 3 | Added JSON/DTO, controller-service layering, and React state decisions |
