@@ -1,14 +1,45 @@
 import { useEffect, useRef, useState } from "react";
-import { sendMessage } from "./api/chatApi";
+import { fetchMessages, sendMessage } from "./api/chatApi";
 import "./App.css";
 
+const STORAGE_KEY = "docmind.conversationId";
+const WELCOME = { role: "assistant", text: "Hi! I'm DocMind. Ask me anything." };
+
 function App() {
-  const [messages, setMessages] = useState([
-    { role: "assistant", text: "Hi! I'm DocMind. Ask me anything." },
-  ]);
+  const [messages, setMessages] = useState([WELCOME]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [conversationId, setConversationId] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? Number(saved) : null;
+  });
   const bottomRef = useRef(null);
+
+  // On first load: if we remember a conversation, fetch its history
+  useEffect(() => {
+    if (!conversationId) return;
+
+    fetchMessages(conversationId)
+      .then((history) => {
+        if (history === null) {
+          localStorage.removeItem(STORAGE_KEY);
+          setConversationId(null);
+        } else if (history.length > 0) {
+          setMessages(history);
+        }
+      })
+      .catch((error) => {
+        setMessages([
+          WELCOME,
+          {
+            role: "assistant",
+            text: "Could not load your previous messages: " + error.message,
+            error: true,
+          },
+        ]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on first load
+  }, []);
 
   // Scroll to the newest message whenever something changes
   useEffect(() => {
@@ -24,8 +55,10 @@ function App() {
     setLoading(true);
 
     try {
-      const reply = await sendMessage(text);
-      setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+      const result = await sendMessage(text, conversationId);
+      setConversationId(result.conversationId);
+      localStorage.setItem(STORAGE_KEY, String(result.conversationId));
+      setMessages((prev) => [...prev, { role: "assistant", text: result.reply }]);
     } catch (error) {
       setMessages((prev) => [
         ...prev,
@@ -40,6 +73,13 @@ function App() {
     }
   }
 
+  function handleNewChat() {
+    if (loading) return;
+    localStorage.removeItem(STORAGE_KEY);
+    setConversationId(null);
+    setMessages([WELCOME]);
+  }
+
   function handleKeyDown(event) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -49,7 +89,12 @@ function App() {
 
   return (
     <div className="app">
-      <h1>DocMind AI 🧠</h1>
+      <div className="header">
+        <h1>DocMind AI 🧠</h1>
+        <button className="new-chat" onClick={handleNewChat} disabled={loading}>
+          New chat
+        </button>
+      </div>
 
       <div className="messages">
         {messages.map((m, index) => (

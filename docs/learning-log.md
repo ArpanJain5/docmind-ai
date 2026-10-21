@@ -30,3 +30,11 @@
 - Moved fetch code into src/api/chatApi.js
 - Learned: test the backend alone first (Invoke-RestMethod), then connect the frontend
 - Learned: a POST with JSON triggers a CORS preflight (OPTIONS) request
+
+## Day 4
+- Created the docmind database and a dedicated MySQL user (least privilege, utf8mb4)
+- Added Spring Data JPA + MySQL driver
+- Learned: entities (Java class = table), repositories (Spring writes the SQL), Conversation 1-to-many Message
+- Kept the DB password out of Git using a git-ignored application-local.properties profile
+- Saved every chat message to MySQL and loaded history after a page refresh
+- Learned: do not keep a DB transaction open while waiting for a slow call

@@ -22,3 +22,4 @@ An AI-powered workspace for students, developers, and office teams.
 🚧 Day 1: maven and dependency installation
 🚧 Day 2: React frontend connected to the Spring Boot backend
 🚧 Day 3: chat screen with a fake backend reply (JSON)
+🚧 Day 4: chat history saved in MySQL

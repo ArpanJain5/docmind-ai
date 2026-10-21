@@ -61,6 +61,9 @@
 | 24 | Request/response objects | Java records as DTOs | ✅ |
 | 25 | Backend structure | Controller → Service layers | ✅ |
 | 26 | Frontend state | React `useState` (no state library yet) | ✅ |
+| 27 | Local DB credentials | Git-ignored `application-local.properties` (Spring profile) | ✅ |
+| 28 | Schema management | Hibernate `ddl-auto=update` (development only) | ✅ |
+| 29 | Chat data model | `Conversation` 1 → many `Message` | ✅ |
 
 ---
 
@@ -129,7 +132,7 @@
 
 ---
 
-### 3.9 MySQL 🔜
+### 3.9 MySQL ✅
 - **What:** Relational database storing users, chats, messages, and document metadata.
 - **Why we chose it:** Our data is structured and related (a user has many chats, a chat has many messages), which fits tables and foreign keys. MySQL is free, widely used, and has good Spring support. Workbench makes inspection easy.
 - **Alternatives:** PostgreSQL, MongoDB, H2 (in-memory), SQLite.
@@ -139,7 +142,7 @@
   - *H2 / SQLite:* Good for tests, but not representative of a real deployment.
 - **What we store vs. not:** Uploaded PDF files go on disk (or cloud storage). The database stores only metadata and extracted text.
 
-### 3.10 Spring Data JPA + Hibernate 🔜
+### 3.10 Spring Data JPA + Hibernate ✅
 - **What:** Maps Java classes to database tables, so we write less SQL.
 - **Why we chose it:** Standard in Spring projects. Repository interfaces give us CRUD operations with almost no code.
 - **Alternatives:** Plain JDBC / JdbcTemplate, MyBatis, jOOQ.
@@ -283,6 +286,46 @@
   - *TanStack Query:* Helpful for caching server data, a possible upgrade when we load chat history.
 - **Interview line:** "I add a state library only when state is shared across screens. Until then, useState keeps things simple."
 
+### 3.27 Chat data model: Conversation + Message ✅
+- **What:** Two tables. `conversations` (id, title, created_at) and `messages` (id, conversation_id, role, content, created_at).
+- **Why we chose it:** One chat has many messages, which is a classic one-to-many relationship. Separate tables let us list chats cheaply and load one chat's messages when it is opened. It also gives us a place to attach the user later.
+- **Alternatives:** A single messages table with a loose chat-id string, one JSON column holding the whole chat, a document database (MongoDB).
+- **Why not those:**
+  - *Single table:* No clean place for chat-level data (title, owner).
+  - *JSON column:* Rewriting the whole chat on every message, and hard to query.
+  - *MongoDB:* Reasonable for chat logs, but our data is relational and SQL joins are a skill worth practicing.
+- **Details worth mentioning:** `role` is stored as a string enum (`EnumType.STRING`), so reordering the enum cannot silently corrupt old rows. `content` is `TEXT`, since the default 255-character column would fail on long messages. Timestamps are `Instant` (UTC). The relation is `LAZY` to avoid loading data we don't need.
+- **Interview line:** "I stored enums as strings so a reordered enum could never change the meaning of existing data."
+
+### 3.28 Dedicated DB user + git-ignored credentials ✅
+- **What:** The app connects as `docmind_user`, which has rights only on the `docmind` database. Its password is in `application-local.properties`, ignored by Git. A `.example` copy shows the format.
+- **Why we chose it:** Least privilege limits the damage if the app is compromised, and a committed password is leaked permanently, because Git history keeps it.
+- **Alternatives:** Connecting as root, hard-coding the password, environment variables, a secrets manager (Vault, cloud).
+- **Why not those:**
+  - *root:* Full control of the whole server.
+  - *Hard-coded:* Ends up on GitHub.
+  - *Env vars / secrets manager:* The right choice for deployment, and we'll switch when we deploy. A local profile file is the simplest safe option for development.
+- **Interview line:** "I verified with `git check-ignore` that the credentials file was ignored before my first commit."
+
+### 3.29 Schema management: ddl-auto=update ✅
+- **What:** Hibernate creates and updates tables from the entity classes at startup.
+- **Why we chose it:** Fast iteration while the model is changing every day.
+- **Alternatives:** Flyway or Liquibase (versioned SQL migrations), hand-written SQL scripts.
+- **Why not those (yet):** Migrations are the correct approach for production, because every schema change is reviewed, versioned, and repeatable. `ddl-auto=update` can't safely rename or drop columns and gives no history. Planned: switch to Flyway before deployment.
+- **Interview line:** "ddl-auto=update is for development. For production I'd use Flyway migrations so schema changes are versioned and reviewable."
+
+### 3.30 No transaction around slow calls ✅
+- **What:** `ChatService.chat()` saves the user message, then calls the (slow) reply generator, then saves the reply. Each save is its own short transaction.
+- **Why we chose it:** A transaction holds a database connection. Wrapping a 1 to 5 second AI call in one would tie up connections, and under load the connection pool would run out.
+- **Alternatives:** `@Transactional` on the whole method.
+- **Trade-off:** If the AI call fails, the user's message is already saved (acceptable, and even useful for retrying), but the chat has no reply.
+- **Interview line:** "I keep transactions short and never hold one open across an external API call."
+
+### 3.31 Known limitations (temporary) ✅
+- **Active chat is remembered in the browser's localStorage.** This is a stopgap until login exists, when the server will list each user's own chats.
+- **Conversation ids are sequential and unprotected.** Anyone who guesses `/api/conversations/2/messages` can read it. This is fixed in Week 2 by tying conversations to users and checking ownership on every request.
+- **Interview line:** "I know the endpoint has no authorization yet. It's the first thing the login work fixes."
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -305,6 +348,9 @@ A: Streaming responses, embeddings for better retrieval, refresh tokens, rate li
 **Q: What was the hardest bug?**
 A: My Spring Boot app started, then crashed with "declared package does not match expected package." I read the stack trace to the last `Caused by:` line and saw I had typed the Group Id as `com.docmin` instead of `com.docmind`. Renaming the folders did not update the `package` line inside each file, so I used a search command to find the leftovers, fixed them, and ran `mvnw clean` to remove old compiled files.
 
+**Q: How do you store chat history?**
+A: Two tables: conversations and messages, linked one-to-many. The service saves the user message, calls the AI without holding a transaction open, then saves the reply. React loads history by conversation id.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -317,6 +363,7 @@ A: My Spring Boot app started, then crashed with "declared package does not matc
 | 1 | Spring Initializr created `backend/backend/pom.xml` | Initializr makes its own subfolder named after the Artifact Id | Moved all files up one level with `Move-Item` and deleted the empty folder |
 | 1 | `Unresolved compilation problem: declared package does not match expected package` | Group Id typed as `com.docmin` (missing "d"), so folders and package lines did not match | Fixed groupId in pom.xml, renamed folders, updated the `package` line in each file, ran `mvnw clean` |
 | 2 | Browser showed "Failed to fetch" and a CORS error in the Console | Frontend (5173) and backend (8080) are different origins, and the backend did not allow 5173 | Added `WebConfig` with `addCorsMappings` allowing `http://localhost:5173` |
+| 4 | MySQL login error and a wrong property was added
 
 ---
 
@@ -343,3 +390,4 @@ Copy this each time we add a tool:
 | 1 | Marked Spring Boot, Maven, Lombok, DevTools, Spring Web as in use; added 2 challenges |
 | 2 | Marked React and Vite as in use; added CORS, fetch, JavaScript, and ESLint decisions; added the CORS challenge |
 | 3 | Added JSON/DTO, controller-service layering, and React state decisions |
+| 4 | Marked MySQL and JPA as in use; added data model, credentials, schema management, transactions, and known-limitations decisions |
