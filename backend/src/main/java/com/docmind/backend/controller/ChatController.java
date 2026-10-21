@@ -13,6 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/chat")
 public class ChatController {
 
+    private static final int MAX_MESSAGE_LENGTH = 4000;
+
     private final ChatService chatService;
 
     public ChatController(ChatService chatService) {
@@ -21,10 +23,10 @@ public class ChatController {
 
     @PostMapping
     public ResponseEntity<ChatResponse> chat(@RequestBody ChatRequest request) {
-        if (request.message() == null || request.message().isBlank()) {
+        String message = request.message();
+        if (message == null || message.isBlank() || message.length() > MAX_MESSAGE_LENGTH) {
             return ResponseEntity.badRequest().build();
         }
-        String reply = chatService.generateReply(request.message());
-        return ResponseEntity.ok(new ChatResponse(reply));
+        return ResponseEntity.ok(chatService.chat(request.conversationId(), message));
     }
 }

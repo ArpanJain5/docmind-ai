@@ -1,4 +1,4 @@
 package com.docmind.backend.dto;
 
-public record ChatResponse(String reply) {
+public record ChatResponse(Long conversationId, String reply) {
 }

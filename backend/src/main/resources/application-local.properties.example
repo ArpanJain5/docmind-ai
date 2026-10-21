@@ -1,0 +1,7 @@
+spring.datasource.url=jdbc:mysql://localhost:3306/docmind?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+spring.datasource.username=docmind_user
+spring.datasource.password=PUT_YOUR_PASSWORD_HERE
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.open-in-view=false
