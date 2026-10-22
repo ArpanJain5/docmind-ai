@@ -64,6 +64,9 @@
 | 27 | Local DB credentials | Git-ignored `application-local.properties` (Spring profile) | ✅ |
 | 28 | Schema management | Hibernate `ddl-auto=update` (development only) | ✅ |
 | 29 | Chat data model | `Conversation` 1 → many `Message` | ✅ |
+| 30 | Password hashing | BCrypt (`BCryptPasswordEncoder`) | ✅ |
+| 31 | Input validation | Jakarta Bean Validation (`@Valid`) | ✅ |
+| 32 | Email handling | Lowercased, unique constraint, 409 on duplicate | ✅ |
 
 ---
 
@@ -326,6 +329,47 @@
 - **Conversation ids are sequential and unprotected.** Anyone who guesses `/api/conversations/2/messages` can read it. This is fixed in Week 2 by tying conversations to users and checking ownership on every request.
 - **Interview line:** "I know the endpoint has no authorization yet. It's the first thing the login work fixes."
 
+### 3.32 Password hashing with BCrypt ✅
+- **What:** Passwords are run through BCrypt before saving. Only the 60-character hash is stored.
+- **Why we chose it:** BCrypt is deliberately slow (so brute-forcing is expensive) and adds a random salt (so identical passwords produce different hashes). It's the default in Spring Security and widely trusted.
+- **Alternatives:** Argon2, scrypt, PBKDF2, SHA-256 or MD5 (plain hashes), storing the password as is.
+- **Why not those:**
+  - *Plain MD5/SHA-256:* Built to be fast, so attackers can test billions of guesses per second. Not suitable for passwords.
+  - *Storing as-is:* One database leak exposes every account (and people reuse passwords elsewhere).
+  - *Argon2 / scrypt:* Stronger against specialized hardware and a fine upgrade. Spring supports them, and BCrypt is the safe, well-understood default.
+- **Known limit:** BCrypt only uses the first 72 bytes, so we cap passwords at 72 characters.
+- **Interview line:** "I never store or log passwords. BCrypt is slow on purpose and salts each hash, so even two users with the same password have different hashes."
+
+### 3.33 Input validation with Bean Validation ✅
+- **What:** Rules like `@Email`, `@NotBlank`, and `@Size` are written on the request DTO, and `@Valid` in the controller enforces them. A broken rule gives 400 Bad Request.
+- **Why we chose it:** The rules live beside the data they describe, and the controller stays short.
+- **Alternatives:** Manual `if` checks in the controller or service, validating only in React.
+- **Why not those:**
+  - *Manual checks:* Repetitive and easy to forget.
+  - *Only in React:* Users (or attackers) can call the API directly, so the server must always validate.
+- **Interview line:** "Frontend validation is for user experience. Backend validation is for security."
+
+### 3.34 Email handling and duplicate protection ✅
+- **What:** Emails are trimmed and lowercased before saving. A pre-check returns 409 Conflict, and a database `unique` constraint is the safety net for simultaneous requests.
+- **Why we chose it:** Without normalizing, `A@x.com` and `a@x.com` could become two accounts. The pre-check alone has a race condition, and the constraint closes it.
+- **Alternatives:** Pre-check only, constraint only.
+- **Why not those:** Pre-check only can still produce duplicates when two requests arrive at the same moment. Constraint only gives an ugly 500 error unless we catch it.
+- **Trade-off:** Returning "email already registered" tells an attacker which emails have accounts (user enumeration). Many apps accept this for better user experience. Rate limiting on this endpoint is a future improvement.
+
+### 3.35 Security configuration decisions ✅
+- **What:** A `SecurityFilterChain` that turns on CORS, disables CSRF, uses stateless sessions, opens `/api/auth/**` and `/api/hello`, and requires authentication for everything else.
+- **Why we chose it:** The API will use tokens in headers, not cookies. CSRF attacks rely on the browser automatically sending cookies, so with a header token they don't apply. Stateless means no server-side session to manage.
+- **Alternatives:** Cookie sessions with CSRF protection, Spring's default form login, HTTP Basic.
+- **Why not those:**
+  - *Cookie sessions + CSRF:* A valid approach (and often simpler for same-site apps), but our React app is a separate origin and we want a mobile-friendly API.
+  - *Form login / Basic:* Meant for server-rendered pages, not a JSON API with a separate frontend.
+- **Reminder:** This is the "CORS must also be enabled in Spring Security" note from 3.20, now in practice. Without `.cors(...)`, the browser's preflight request is blocked.
+
+### 3.36 Known limitations (updated) ✅
+- **Chat endpoints are still open** (`/api/chat` and `/api/conversations/**` are `permitAll`). This is intentional and temporary. Anyone can read any conversation until login exists and conversations are tied to users with an ownership check.
+- **No email verification and no rate limiting** on registration.
+- **Interview line:** "I opened the chat endpoints temporarily so the app kept working while I built accounts. They're locked down as soon as login is wired in."
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -350,6 +394,12 @@ A: My Spring Boot app started, then crashed with "declared package does not matc
 
 **Q: How do you store chat history?**
 A: Two tables: conversations and messages, linked one-to-many. The service saves the user message, calls the AI without holding a transaction open, then saves the reply. React loads history by conversation id.
+
+**Q: How do you store passwords?**
+A: Hashed with BCrypt, which is one-way, slow on purpose, and salted. I verified two users with the same password get different hashes. Passwords are never logged or returned by the API, because I return a DTO that has no password field.
+
+**Q: Why disable CSRF?**
+A: CSRF abuses cookies that browsers send automatically. My API will authenticate with a token that JavaScript adds to a header, so a malicious site can't trigger authenticated requests. If I used cookie sessions, I would keep CSRF protection on.
 
 ---
 
@@ -391,3 +441,4 @@ Copy this each time we add a tool:
 | 2 | Marked React and Vite as in use; added CORS, fetch, JavaScript, and ESLint decisions; added the CORS challenge |
 | 3 | Added JSON/DTO, controller-service layering, and React state decisions |
 | 4 | Marked MySQL and JPA as in use; added data model, credentials, schema management, transactions, and known-limitations decisions |
+| 5 | Added BCrypt, Bean Validation, email handling, security configuration decisions, and updated the known limitations |

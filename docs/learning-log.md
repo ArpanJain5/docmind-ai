@@ -38,3 +38,12 @@
 - Kept the DB password out of Git using a git-ignored application-local.properties profile
 - Saved every chat message to MySQL and loaded history after a page refresh
 - Learned: do not keep a DB transaction open while waiting for a slow call
+
+## Day 5
+- Added Spring Security and Bean Validation
+- Created the User entity and POST /api/auth/register
+- Learned: passwords are hashed with BCrypt (one-way, salted), never stored or logged
+- Verified in MySQL: same password for two users gives two different 60-character hashes
+- Learned: Spring Security locks every endpoint by default; I opened only what is needed
+- Learned: Spring Security must be told to use the CORS rules, or React is blocked again
+- Handled duplicate emails two ways: a pre-check plus the database unique constraint (409 Conflict)
