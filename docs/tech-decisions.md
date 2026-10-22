@@ -364,6 +364,7 @@
   - *Cookie sessions + CSRF:* A valid approach (and often simpler for same-site apps), but our React app is a separate origin and we want a mobile-friendly API.
   - *Form login / Basic:* Meant for server-rendered pages, not a JSON API with a separate frontend.
 - **Reminder:** This is the "CORS must also be enabled in Spring Security" note from 3.20, now in practice. Without `.cors(...)`, the browser's preflight request is blocked.
+- **Gotcha:** `/error` must be permitted. Spring Boot forwards every error response (400, 409, 404) to `/error`. If Security locks it, all errors are replaced by a generic 403 and the real cause is hidden.
 
 ### 3.36 Known limitations (updated) ✅
 - **Chat endpoints are still open** (`/api/chat` and `/api/conversations/**` are `permitAll`). This is intentional and temporary. Anyone can read any conversation until login exists and conversations are tied to users with an ownership check.
@@ -412,8 +413,9 @@ A: CSRF abuses cookies that browsers send automatically. My API will authenticat
 | 0 | `init.defaultBranch` showed `master` and `main` | Two config levels; last one wins | Left as is, since `main` overrides |
 | 1 | Spring Initializr created `backend/backend/pom.xml` | Initializr makes its own subfolder named after the Artifact Id | Moved all files up one level with `Move-Item` and deleted the empty folder |
 | 1 | `Unresolved compilation problem: declared package does not match expected package` | Group Id typed as `com.docmin` (missing "d"), so folders and package lines did not match | Fixed groupId in pom.xml, renamed folders, updated the `package` line in each file, ran `mvnw clean` |
-| 2 | Browser showed "Failed to fetch" and a CORS error in the Console | Frontend (5173) and backend (8080) are different origins, and the backend did not allow 5173 | Added `WebConfig` with `addCorsMappings` allowing `http://localhost:5173` |
-| 4 | MySQL login error and a wrong property was added
+| 2 | Browser showed "Failed to fetch" and a CORS error in the Console | Frontend (5173) and backend (8080) are different origins. The request reached Spring Boot, but the browser blocked the response because the backend did not allow 5173 | Added `WebConfig` with `addCorsMappings` allowing `http://localhost:5173` |
+| 4 | MySQL Workbench query would not run (Ctrl+Shift+Enter did nothing, toolbar icons greyed out) | The query tab was opened without a connection to the server | Opened the tab from inside the "Local instance MySQL80" connection (Ctrl+T) and ran it with the toolbar lightning bolt |
+| 5 | Duplicate-email and validation errors returned 403 instead of 409 / 400 | Spring Boot forwards errors to `/error`, and Security's `anyRequest().authenticated()` rule blocked that path, hiding the real status code | Added `.requestMatchers("/error").permitAll()` to the security config |
 
 ---
 
@@ -442,3 +444,4 @@ Copy this each time we add a tool:
 | 3 | Added JSON/DTO, controller-service layering, and React state decisions |
 | 4 | Marked MySQL and JPA as in use; added data model, credentials, schema management, transactions, and known-limitations decisions |
 | 5 | Added BCrypt, Bean Validation, email handling, security configuration decisions, and updated the known limitations |
+| 5 | Duplicate email and validation errors all returned 403 instead of 409 / 400 | Spring forwards errors internally to `/error`, and Spring Security's `anyRequest().authenticated()` rule blocked that path, hiding the real status code | Added `.requestMatchers("/error").permitAll()` to the security config |

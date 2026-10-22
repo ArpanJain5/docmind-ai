@@ -47,3 +47,4 @@
 - Learned: Spring Security locks every endpoint by default; I opened only what is needed
 - Learned: Spring Security must be told to use the CORS rules, or React is blocked again
 - Handled duplicate emails two ways: a pre-check plus the database unique constraint (409 Conflict)
+- Debugged: all error responses were 403 because Spring Security blocked the internal /error path. Reading the symptom (every error is 403, even validation failures) pointed to a security rule, not my controller code
