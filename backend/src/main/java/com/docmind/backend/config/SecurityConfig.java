@@ -1,0 +1,42 @@
+package com.docmind.backend.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                // Use the CORS rules from WebConfig (without this, the browser blocks React again)
+                .cors(Customizer.withDefaults())
+                // Safe to turn off: we use tokens in headers (coming tomorrow), not cookies
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers("/api/auth/**", "/api/hello").permitAll()
+                        // Spring forwards errors (400/409/etc.) to /error; if it is blocked, they all turn into 403
+                        .requestMatchers("/error").permitAll()
+                        // TEMPORARY: keep the chat working until accounts own conversations.
+                        // These two lines are removed once login is wired into the chat.
+                        .requestMatchers("/api/chat", "/api/conversations/**").permitAll()
+                        .anyRequest().authenticated());
+
+        return http.build();
+    }
+}
