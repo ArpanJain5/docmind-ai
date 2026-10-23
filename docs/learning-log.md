@@ -48,3 +48,11 @@
 - Learned: Spring Security must be told to use the CORS rules, or React is blocked again
 - Handled duplicate emails two ways: a pre-check plus the database unique constraint (409 Conflict)
 - Debugged: all error responses were 403 because Spring Security blocked the internal /error path. Reading the symptom (every error is 403, even validation failures) pointed to a security rule, not my controller code
+
+## Day 6
+- Added POST /api/auth/login that checks the BCrypt hash and returns a signed JWT
+- Added GET /api/auth/me, which only works with a valid Bearer token
+- Learned: a JWT is signed, not encrypted; I decoded my own token in PowerShell
+- Learned: tampered or missing tokens give 401, and I opened only register and login to strangers
+- Learned: the same error message for wrong email and wrong password avoids leaking which emails exist
+- Kept the JWT secret out of Git using application-local.properties

@@ -67,6 +67,9 @@
 | 30 | Password hashing | BCrypt (`BCryptPasswordEncoder`) | ✅ |
 | 31 | Input validation | Jakarta Bean Validation (`@Valid`) | ✅ |
 | 32 | Email handling | Lowercased, unique constraint, 409 on duplicate | ✅ |
+| 33 | JWT creation and checking | Spring Security OAuth2 resource server (Nimbus), HS256 | ✅ |
+| 34 | Token lifetime | 60 minutes, configurable | ✅ |
+| 35 | Login error handling | One generic 401 message | ✅ |
 
 ---
 
@@ -371,6 +374,34 @@
 - **No email verification and no rate limiting** on registration.
 - **Interview line:** "I opened the chat endpoints temporarily so the app kept working while I built accounts. They're locked down as soon as login is wired in."
 
+### 3.37 JWT with Spring's built-in resource server ✅
+- **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
+- **Why we chose it:** It's maintained by the Spring team, needs no hand-written filter (less security code to get wrong), and the token checking is the same code real production apps use.
+- **Alternatives:** The `jjwt` library with a custom filter, Auth0 `java-jwt`, server-side sessions, an external identity provider (Keycloak, Auth0, Firebase).
+- **Why not those:**
+  - *jjwt / java-jwt with a custom filter:* Works and is popular in tutorials, but we would own the filter code and its edge cases.
+  - *Sessions:* Simple, but they need server-side state, and our React app and API are on different origins.
+  - *External provider:* The right choice for many production systems, but it hides the mechanics we are here to learn. A possible later upgrade.
+- **Algorithm:** HS256 (one shared secret signs and verifies). That's fine for a single backend. With several services, we'd move to RS256 or ES256 (a private key signs, a public key verifies).
+- **Interview line:** "A JWT is signed, not encrypted. I only put the user id and timestamps in it, and I verified the signature and expiry on every request."
+
+### 3.38 Token contents and lifetime ✅
+- **What:** The token holds the issuer, issue time, expiry, and the user id as `sub`. It lasts 60 minutes.
+- **Why we chose it:** The payload is readable by anyone, so it carries the minimum. A short lifetime limits the damage if a token leaks, because we cannot easily revoke a JWT before it expires.
+- **Alternatives:** Long-lived tokens (days or weeks), refresh tokens, a server-side token blacklist.
+- **Why not those (yet):** Long-lived tokens are risky. Refresh tokens add flow complexity and are a planned improvement. A blacklist brings back server-side state, which is what JWTs avoid.
+- **Known limit:** Users get logged out after an hour until refresh tokens exist.
+- **Open question:** Where should React store the token? `localStorage` is simple, but any injected script can read it. An httpOnly cookie is safer against that, but needs CSRF thought. Decision on Day 7.
+
+### 3.39 Login error handling ✅
+- **What:** Wrong password and unknown email both return the same 401 "Invalid email or password".
+- **Why we chose it:** Different messages would let an attacker test which emails have accounts (user enumeration).
+- **Trade-offs and limits:** Registration still reveals duplicates (409), and an unknown-email login is slightly faster than a wrong-password login, because BCrypt is only run when the user exists. Rate limiting and constant-time handling are future improvements.
+- **Interview line:** "I return identical errors for both failures so the login form doesn't confirm which emails exist."
+
+### 3.36 Known limitations: update this section ✅
+- Replace the first bullet with: "Chat endpoints are still open (`/api/chat`, `/api/conversations/**` are `permitAll`), even though login now works. Anyone can still read any conversation until conversations belong to users and an ownership check is added (Day 8)."
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -402,6 +433,12 @@ A: Hashed with BCrypt, which is one-way, slow on purpose, and salted. I verified
 **Q: Why disable CSRF?**
 A: CSRF abuses cookies that browsers send automatically. My API will authenticate with a token that JavaScript adds to a header, so a malicious site can't trigger authenticated requests. If I used cookie sessions, I would keep CSRF protection on.
 
+**Q: How does JWT authentication work in your app?**
+A: Login checks the password against the BCrypt hash and returns a signed token holding the user id and expiry. React sends it in the Authorization header, and Spring Security verifies the signature and expiry on every request. The token is signed, not encrypted, so it carries nothing private.
+
+**Q: What is the downside of JWTs?**
+A: They cannot be revoked easily before they expire, so I keep the lifetime short and plan refresh tokens.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -416,6 +453,10 @@ A: CSRF abuses cookies that browsers send automatically. My API will authenticat
 | 2 | Browser showed "Failed to fetch" and a CORS error in the Console | Frontend (5173) and backend (8080) are different origins. The request reached Spring Boot, but the browser blocked the response because the backend did not allow 5173 | Added `WebConfig` with `addCorsMappings` allowing `http://localhost:5173` |
 | 4 | MySQL Workbench query would not run (Ctrl+Shift+Enter did nothing, toolbar icons greyed out) | The query tab was opened without a connection to the server | Opened the tab from inside the "Local instance MySQL80" connection (Ctrl+T) and ran it with the toolbar lightning bolt |
 | 5 | Duplicate-email and validation errors returned 403 instead of 409 / 400 | Spring Boot forwards errors to `/error`, and Security's `anyRequest().authenticated()` rule blocked that path, hiding the real status code | Added `.requestMatchers("/error").permitAll()` to the security config |
+| 6 | App failed to start: `Could not resolve placeholder 'app.jwt.secret'` | The secret was missing from `application-local.properties` (or misspelled) | Added `app.jwt.secret` with a generated random value |
+| 6 | App refused to start: secret too short | HS256 needs at least 32 bytes, and my secret was shorter | Generated a new 48-byte random secret |
+| 6 | `/api/auth/me` returned 200 without a token | The wildcard `/api/auth/**` was still permitted from Day 5 | Replaced it with specific matchers for POST `/register` and `/login` only |
+| 6 | Compile errors on JWT classes | The dependency had not downloaded yet | Synchronized the Maven project and ran `.\mvnw clean` |
 
 ---
 
@@ -445,3 +486,4 @@ Copy this each time we add a tool:
 | 4 | Marked MySQL and JPA as in use; added data model, credentials, schema management, transactions, and known-limitations decisions |
 | 5 | Added BCrypt, Bean Validation, email handling, security configuration decisions, and updated the known limitations |
 | 5 | Duplicate email and validation errors all returned 403 instead of 409 / 400 | Spring forwards errors internally to `/error`, and Spring Security's `anyRequest().authenticated()` rule blocked that path, hiding the real status code | Added `.requestMatchers("/error").permitAll()` to the security config |
+| 6 | Marked Spring Security + JWT as in use; added JWT library choice, token lifetime, login error handling; updated known limitations |
