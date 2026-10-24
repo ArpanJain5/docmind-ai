@@ -104,3 +104,19 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.header {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-name {
+  opacity: 0.8;
+  font-size: 0.95rem;
+}

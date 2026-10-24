@@ -1,31 +1,21 @@
-const API_BASE = "http://localhost:8080/api";
+import { ApiError, request } from "./http";
 
-export async function sendMessage(message, conversationId) {
-  const response = await fetch(`${API_BASE}/chat`, {
+export function sendMessage(message, conversationId) {
+  // returns { conversationId, reply }
+  return request("/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, conversationId }),
+    body: { message, conversationId },
   });
-
-  if (!response.ok) {
-    throw new Error("Server returned " + response.status);
-  }
-
-  return response.json(); // { conversationId, reply }
 }
 
 export async function fetchMessages(conversationId) {
-  const response = await fetch(
-    `${API_BASE}/conversations/${conversationId}/messages`
-  );
-
-  if (response.status === 404) {
-    return null; // this conversation no longer exists
+  try {
+    const data = await request(`/conversations/${conversationId}/messages`);
+    return data.map((m) => ({ role: m.role, text: m.content }));
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null; // this conversation no longer exists
+    }
+    throw error;
   }
-  if (!response.ok) {
-    throw new Error("Server returned " + response.status);
-  }
-
-  const data = await response.json();
-  return data.map((m) => ({ role: m.role, text: m.content }));
 }
