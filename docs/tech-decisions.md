@@ -70,6 +70,10 @@
 | 33 | JWT creation and checking | Spring Security OAuth2 resource server (Nimbus), HS256 | ✅ |
 | 34 | Token lifetime | 60 minutes, configurable | ✅ |
 | 35 | Login error handling | One generic 401 message | ✅ |
+| 36 | Where the token is stored | `localStorage` (for now) | ✅ |
+| 37 | Auth state in React | React Context (`AuthProvider` + `useAuth`) | ✅ |
+| 38 | API calls from React | One `request()` helper around `fetch` | ✅ |
+| 39 | Screen switching | Conditional rendering (no router yet) | ✅ |
 
 ---
 
@@ -244,8 +248,9 @@
 - **Why we chose it:** No extra library, and it teaches how HTTP calls really work.
 - **Alternatives:** Axios, TanStack Query (React Query), SWR.
 - **Why not those:**
-  - *Axios:* Nicer syntax and automatic JSON handling, but an extra dependency. We may adopt it when we add login tokens.
-  - *TanStack Query:* Great for caching and loading states, but adds concepts. A possible upgrade later.
+- *Axios:* Nicer syntax and automatic JSON handling, but an extra dependency. We may adopt it when we add login tokens.
+- *TanStack Query:* Great for caching and loading states, but adds concepts. A possible upgrade later.
+- **Update (Day 7):** We stayed with `fetch` and wrapped it in a `request()` helper (see 3.42) instead of adopting Axios.
 
 ### 3.22 JavaScript vs TypeScript ✅
 - **What:** We use plain JavaScript (JSX) for the React code.
@@ -370,9 +375,11 @@
 - **Gotcha:** `/error` must be permitted. Spring Boot forwards every error response (400, 409, 404) to `/error`. If Security locks it, all errors are replaced by a generic 403 and the real cause is hidden.
 
 ### 3.36 Known limitations (updated) ✅
-- **Chat endpoints are still open** (`/api/chat` and `/api/conversations/**` are `permitAll`). This is intentional and temporary. Anyone can read any conversation until login exists and conversations are tied to users with an ownership check.
-- **No email verification and no rate limiting** on registration.
-- **Interview line:** "I opened the chat endpoints temporarily so the app kept working while I built accounts. They're locked down as soon as login is wired in."
+- **Chat endpoints are still open** on the backend. The login gate exists only in the React UI, so anyone can call `/api/chat` and `/api/conversations/**` directly. Fix: tie conversations to users and require a token (Day 8).
+- **Token in localStorage** is readable by injected scripts (see 3.40).
+- **No refresh tokens:** users must log in again after 60 minutes.
+- **If the backend is down on page load,** the user sees the login screen even with a saved token.
+- **No email verification and no rate limiting** on register or login.
 
 ### 3.37 JWT with Spring's built-in resource server ✅
 - **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
@@ -399,8 +406,37 @@
 - **Trade-offs and limits:** Registration still reveals duplicates (409), and an unknown-email login is slightly faster than a wrong-password login, because BCrypt is only run when the user exists. Rate limiting and constant-time handling are future improvements.
 - **Interview line:** "I return identical errors for both failures so the login form doesn't confirm which emails exist."
 
-### 3.36 Known limitations: update this section ✅
-- Replace the first bullet with: "Chat endpoints are still open (`/api/chat`, `/api/conversations/**` are `permitAll`), even though login now works. Anyone can still read any conversation until conversations belong to users and an ownership check is added (Day 8)."
+### 3.40 Where to store the JWT: localStorage (for now) ✅
+- **What:** After login, the token is saved in the browser's `localStorage` and attached to each request as `Authorization: Bearer <token>`.
+- **Why we chose it:** It survives refreshes and works with our stateless, header-based backend with no extra server changes.
+- **Alternatives:** An httpOnly cookie, keeping the token only in JavaScript memory (plus a refresh cookie), `sessionStorage`.
+- **Why not those (yet):**
+  - *httpOnly cookie:* JavaScript cannot read it, so injected scripts can't steal it. But it needs backend changes (cookie handling, SameSite, CSRF protection back on).
+  - *Memory only:* Safest against theft, but the user is logged out on every refresh unless refresh tokens exist.
+  - *sessionStorage:* Same theft risk as localStorage, and the login is lost when the tab closes.
+- **Trade-off:** Any script injected into our page (XSS) could read a localStorage token. Mitigations: React escapes output by default, we never use `dangerouslySetInnerHTML`, and tokens expire after 60 minutes.
+- **Planned upgrade:** Refresh tokens in an httpOnly cookie plus a short-lived access token in memory.
+- **Interview line:** "localStorage is simple but readable by injected scripts, so I limit the damage with short expiry and plan to move to an httpOnly refresh cookie."
+
+### 3.41 Auth state with React Context ✅
+- **What:** `AuthProvider` holds the current user and the `login`, `register`, and `logout` functions. Any component reads them with `useAuth()`.
+- **Why we chose it:** Many parts of the app need to know "who is logged in", and Context avoids passing props through every level (prop drilling).
+- **Alternatives:** Redux Toolkit, Zustand, passing props, TanStack Query for the user.
+- **Why not those:** Redux or Zustand are heavier than a single, rarely changing value needs. Props would spread auth data through every component.
+- **Startup behavior:** If a token is saved, the app calls `GET /auth/me` and shows "Checking your session..." until the answer arrives, so users never see a flash of the wrong screen.
+
+### 3.42 One request() helper (no Axios) ✅
+- **What:** Every API call goes through `request()`, which adds the Bearer token, throws a typed `ApiError`, maps status codes to friendly messages, and logs the user out on a 401 when a token was sent.
+- **Why we chose it:** Cross-cutting rules (auth header, expiry handling, error shape) live in one file instead of every screen. This also answers the Day 2 question: we stayed with `fetch` instead of adding Axios.
+- **Alternatives:** Axios with interceptors, TanStack Query, calling `fetch` everywhere.
+- **Why not those:** Axios interceptors would do the same job, with an extra dependency. TanStack Query is useful later for caching chat history.
+- **Details:** Login and register use `skipAuth`, so a stale token can't break them. Messages are written client-side because Spring Boot hides error text by default.
+
+### 3.43 No React Router yet ✅
+- **What:** `App` chooses between `AuthPage` and `ChatPage` using the logged-in state.
+- **Why we chose it:** Two screens don't need URL routing.
+- **Alternatives:** React Router, TanStack Router.
+- **Why not yet:** We'll add React Router when we have more pages (chat list, PDF upload, settings) or need bookmarkable URLs.
 
 ---
 
@@ -439,6 +475,12 @@ A: Login checks the password against the BCrypt hash and returns a signed token 
 **Q: What is the downside of JWTs?**
 A: They cannot be revoked easily before they expire, so I keep the lifetime short and plan refresh tokens.
 
+**Q: Where do you store the JWT in the browser, and what are the risks?**
+A: In localStorage for now. The risk is that an injected script (XSS) could read it, so I rely on React's output escaping, avoid dangerouslySetInnerHTML, and keep tokens short-lived. The planned upgrade is a refresh token in an httpOnly cookie.
+
+**Q: How does your frontend handle an expired token?**
+A: All API calls go through one request() helper. If the server returns 401 for a request that carried a token, it clears the token and logs the user out, so the app returns to the login screen.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -457,6 +499,10 @@ A: They cannot be revoked easily before they expire, so I keep the lifetime shor
 | 6 | App refused to start: secret too short | HS256 needs at least 32 bytes, and my secret was shorter | Generated a new 48-byte random secret |
 | 6 | `/api/auth/me` returned 200 without a token | The wildcard `/api/auth/**` was still permitted from Day 5 | Replaced it with specific matchers for POST `/register` and `/login` only |
 | 6 | Compile errors on JWT classes | The dependency had not downloaded yet | Synchronized the Maven project and ran `.\mvnw clean` |
+| 7 | White page: `useAuth must be used inside <AuthProvider>` | `main.jsx` still rendered `<App />` without the provider | Wrapped `<App />` in `<AuthProvider>` in `main.jsx` |
+| 7 | White page: `Failed to resolve import "./auth/AuthContext"` | Wrong folder or file name (case matters) | Fixed the folder and file names to match the import paths |
+| 7 | Browser blocked requests that carry the `Authorization` header (CORS preflight error) | The backend CORS config did not explicitly allow the header | Added `.allowedHeaders("*")` in `WebConfig` and restarted the backend |
+| 7 | Expired token caused 401 even on open endpoints like `/api/chat` | The bearer-token filter validates any token that is sent, even to `permitAll` endpoints | Skipped the token for login/register and made `request()` clear the token and log out on a 401 |
 
 ---
 
@@ -487,3 +533,4 @@ Copy this each time we add a tool:
 | 5 | Added BCrypt, Bean Validation, email handling, security configuration decisions, and updated the known limitations |
 | 5 | Duplicate email and validation errors all returned 403 instead of 409 / 400 | Spring forwards errors internally to `/error`, and Spring Security's `anyRequest().authenticated()` rule blocked that path, hiding the real status code | Added `.requestMatchers("/error").permitAll()` to the security config |
 | 6 | Marked Spring Security + JWT as in use; added JWT library choice, token lifetime, login error handling; updated known limitations |
+| 7 | Added token storage, auth Context, request helper, and no-router decisions; updated fetch-vs-Axios note and known limitations |

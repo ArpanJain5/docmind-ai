@@ -56,3 +56,11 @@
 - Learned: tampered or missing tokens give 401, and I opened only register and login to strangers
 - Learned: the same error message for wrong email and wrong password avoids leaking which emails exist
 - Kept the JWT secret out of Git using application-local.properties
+
+## Day 7
+- Built login/register screens in React and a Log out button
+- Added a central request() helper that attaches the Bearer token and logs the user out on 401
+- Learned: React Context (AuthProvider) shares "who is logged in" across the app
+- Learned: a token sent to an open endpoint is still validated, so an expired token causes 401 even there
+- Tested: token expiry (1 minute), tampered token, wrong password, refresh keeps me logged in
+- Learned: the login gate is only in the UI today; the backend still allows chat requests without a token
