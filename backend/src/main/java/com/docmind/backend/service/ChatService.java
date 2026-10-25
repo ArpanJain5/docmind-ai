@@ -1,12 +1,15 @@
 package com.docmind.backend.service;
 
 import com.docmind.backend.dto.ChatResponse;
+import com.docmind.backend.dto.ConversationSummary;
 import com.docmind.backend.dto.MessageResponse;
 import com.docmind.backend.model.Conversation;
 import com.docmind.backend.model.Message;
 import com.docmind.backend.model.Role;
+import com.docmind.backend.model.User;
 import com.docmind.backend.repository.ConversationRepository;
 import com.docmind.backend.repository.MessageRepository;
+import com.docmind.backend.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -18,17 +21,21 @@ public class ChatService {
 
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
+    private final UserRepository userRepository;
 
     public ChatService(ConversationRepository conversationRepository,
-                       MessageRepository messageRepository) {
+                       MessageRepository messageRepository,
+                       UserRepository userRepository) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
+        this.userRepository = userRepository;
     }
 
-    public ChatResponse chat(Long conversationId, String userMessage) {
+    public ChatResponse chat(Long userId, Long conversationId, String userMessage) {
         Conversation conversation = (conversationId == null)
-                ? conversationRepository.save(new Conversation(makeTitle(userMessage)))
-                : findConversation(conversationId);
+                ? conversationRepository.save(
+                        new Conversation(findUser(userId), makeTitle(userMessage)))
+                : findOwnedConversation(userId, conversationId);
 
         messageRepository.save(new Message(conversation, Role.USER, userMessage));
 
@@ -41,18 +48,32 @@ public class ChatService {
         return new ChatResponse(conversation.getId(), reply);
     }
 
-    public List<MessageResponse> getMessages(Long conversationId) {
-        findConversation(conversationId); // throws 404 if it does not exist
+    public List<ConversationSummary> listConversations(Long userId) {
+        return conversationRepository.findByUserIdOrderByIdDesc(userId)
+                .stream()
+                .map(ConversationSummary::from)
+                .toList();
+    }
+
+    public List<MessageResponse> getMessages(Long userId, Long conversationId) {
+        findOwnedConversation(userId, conversationId); // 404 unless it is YOURS
         return messageRepository.findByConversationIdOrderByIdAsc(conversationId)
                 .stream()
                 .map(MessageResponse::from)
                 .toList();
     }
 
-    private Conversation findConversation(Long conversationId) {
-        return conversationRepository.findById(conversationId)
+    // The one place that decides "is this chat yours?"
+    private Conversation findOwnedConversation(Long userId, Long conversationId) {
+        return conversationRepository.findByIdAndUserId(conversationId, userId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Conversation not found"));
+    }
+
+    private User findUser(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED, "User no longer exists"));
     }
 
     private String makeTitle(String firstMessage) {

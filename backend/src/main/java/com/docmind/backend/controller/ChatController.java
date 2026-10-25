@@ -4,6 +4,8 @@ import com.docmind.backend.dto.ChatRequest;
 import com.docmind.backend.dto.ChatResponse;
 import com.docmind.backend.service.ChatService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,11 +24,13 @@ public class ChatController {
     }
 
     @PostMapping
-    public ResponseEntity<ChatResponse> chat(@RequestBody ChatRequest request) {
+    public ResponseEntity<ChatResponse> chat(@AuthenticationPrincipal Jwt jwt,
+                                             @RequestBody ChatRequest request) {
         String message = request.message();
         if (message == null || message.isBlank() || message.length() > MAX_MESSAGE_LENGTH) {
             return ResponseEntity.badRequest().build();
         }
-        return ResponseEntity.ok(chatService.chat(request.conversationId(), message));
+        Long userId = Long.valueOf(jwt.getSubject());
+        return ResponseEntity.ok(chatService.chat(userId, request.conversationId(), message));
     }
 }

@@ -29,15 +29,13 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
+                                .authorizeHttpRequests(auth -> auth
                         // Only these doors are open to strangers
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
                         .requestMatchers("/api/hello").permitAll()
                         // Spring forwards errors (400/409/etc.) to /error; if it is blocked, they all turn into 403
                         .requestMatchers("/error").permitAll()
-                        // TEMPORARY: keep the chat working until accounts own conversations.
-                        // These two lines are removed once login is wired into the chat.
-                        .requestMatchers("/api/chat", "/api/conversations/**").permitAll()
+                        // Everything else (chat, conversations, /me) needs a valid token
                         .anyRequest().authenticated())
                 // Read "Authorization: Bearer <token>" and check its stamp
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults()));
