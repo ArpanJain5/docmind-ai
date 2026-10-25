@@ -64,3 +64,13 @@
 - Learned: a token sent to an open endpoint is still validated, so an expired token causes 401 even there
 - Tested: token expiry (1 minute), tampered token, wrong password, refresh keeps me logged in
 - Learned: the login gate is only in the UI today; the backend still allows chat requests without a token
+
+## Day 8
+- Added a user_id owner to conversations (many conversations per user)
+- Learned IDOR / Broken Access Control: guessing ids must never expose another user's data
+- Every conversation lookup now includes the owner: findByIdAndUserId
+- The user id comes from the verified JWT subject, never from the request body
+- Non-owners get 404, not 403, so ids of other users' chats are not revealed
+- Closed the temporary open endpoints: chat and conversations now require a token
+- Tested with two users in PowerShell (401, 404, 404, own chat works)
+- Built a "My chats" sidebar in React

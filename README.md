@@ -26,3 +26,4 @@ An AI-powered workspace for students, developers, and office teams.
 🚧 Day 5: user registration with hashed passwords (login coming next)
 🚧 Day 6: register, login, and JWT-protected endpoints (chat screens next)
 🚧 Day 7: login and register screens (conversations will belong to users next)
+🚧 Day 8: private chats per user with a "My chats" sidebar (real AI next)

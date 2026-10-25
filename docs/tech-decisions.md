@@ -74,6 +74,10 @@
 | 37 | Auth state in React | React Context (`AuthProvider` + `useAuth`) | ✅ |
 | 38 | API calls from React | One `request()` helper around `fetch` | ✅ |
 | 39 | Screen switching | Conditional rendering (no router yet) | ✅ |
+| 40 | Access control for chats | Ownership check in the service layer (`findByIdAndUserId`) | ✅ |
+| 41 | Response for someone else's chat | 404 Not Found (not 403) | ✅ |
+| 42 | Chat ownership model | `Conversation` many-to-one `User` | ✅ |
+| 43 | Dev data migration | Delete old test data before adding the required `user_id` | ✅ |
 
 ---
 
@@ -307,6 +311,7 @@
   - *MongoDB:* Reasonable for chat logs, but our data is relational and SQL joins are a skill worth practicing.
 - **Details worth mentioning:** `role` is stored as a string enum (`EnumType.STRING`), so reordering the enum cannot silently corrupt old rows. `content` is `TEXT`, since the default 255-character column would fail on long messages. Timestamps are `Instant` (UTC). The relation is `LAZY` to avoid loading data we don't need.
 - **Interview line:** "I stored enums as strings so a reordered enum could never change the meaning of existing data."
+- **Update (Day 8):** `conversations` now has a required `user_id` (see 3.46).
 
 ### 3.28 Dedicated DB user + git-ignored credentials ✅
 - **What:** The app connects as `docmind_user`, which has rights only on the `docmind` database. Its password is in `application-local.properties`, ignored by Git. A `.example` copy shows the format.
@@ -438,6 +443,38 @@
 - **Alternatives:** React Router, TanStack Router.
 - **Why not yet:** We'll add React Router when we have more pages (chat list, PDF upload, settings) or need bookmarkable URLs.
 
+### 3.44 Ownership checks in the service layer (IDOR prevention) ✅
+- **What:** Every lookup of a conversation includes the logged-in user's id (`findByIdAndUserId`). The user id comes from the verified JWT, not from anything the client sends.
+- **Why we chose it:** Conversation ids are sequential and easy to guess. Without this, any logged-in user could read or write another user's chats (Insecure Direct Object Reference, part of OWASP's #1 risk, Broken Access Control). Putting the rule in the query means a forgotten check can't leak data.
+- **Alternatives:** Method security (`@PreAuthorize`) with an ownership expression, a check only in the controller, unguessable ids (UUIDs) as the only protection, database row-level security.
+- **Why not those:**
+  - *`@PreAuthorize`:* A fine approach and worth learning, but it still needs the owner lookup, and the query-level check is simpler to read.
+  - *Controller-only check:* Every new controller must remember it.
+  - *UUIDs alone:* Make guessing hard, but they are not authorization. Ids leak through logs, links, and screenshots.
+  - *Row-level security:* Strong, but MySQL doesn't support it natively.
+- **Interview line:** "I never trust an id from the client. Every query includes the owner from the verified token, so guessing another user's id returns nothing."
+
+### 3.45 404 instead of 403 for other people's chats ✅
+- **What:** If a chat exists but belongs to someone else, the API answers exactly as if it didn't exist (404).
+- **Why we chose it:** A 403 would confirm that the id exists, which helps an attacker map out other users' data.
+- **Alternatives:** 403 Forbidden.
+- **Trade-off:** 403 is more precise for debugging and is common for resources that are not secret. For private user data, 404 is the safer default.
+
+### 3.46 Conversation belongs to a user (data model update) ✅
+- **What:** `conversations.user_id` is a required foreign key to `users`. The model is now User → many Conversations → many Messages.
+- **Migration choice:** Old test conversations had no owner, so we deleted them in development before adding the required column. Adding a required column to a table with rows fails or forces fake owner ids.
+- **Alternatives:** Add the column as nullable and backfill, assign old chats to one user, versioned migrations (Flyway).
+- **Why not those:** The data was throwaway test data. In production we'd use a Flyway migration that adds the column, backfills it, and then makes it required.
+- **Interview line:** "I deleted dev data instead of inventing owners. In production I'd write a migration that backfills first."
+
+### 3.36 Known limitations: update this section ✅
+- Remove the bullet about open chat endpoints. Chat and conversations now require a token and an ownership check.
+- Keep the others, and add:
+  - **No delete or rename** of chats yet.
+  - **The chat list is not paginated.** It loads every conversation for the user.
+  - **Tokens last 60 minutes** and live in localStorage (see 3.40).
+  - **The AI reply is still fake.**
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -481,6 +518,12 @@ A: In localStorage for now. The risk is that an injected script (XSS) could read
 **Q: How does your frontend handle an expired token?**
 A: All API calls go through one request() helper. If the server returns 401 for a request that carried a token, it clears the token and logs the user out, so the app returns to the login screen.
 
+**Q: How do you stop one user from reading another user's chats?**
+A: Every conversation query includes the owner's id taken from the verified JWT, using findByIdAndUserId. If the chat isn't theirs, the query finds nothing and the API returns 404. I tested it with two accounts: one user got 404 trying to read or write into the other's chat.
+
+**Q: What is IDOR?**
+A: Insecure Direct Object Reference: the app uses an id from the request to fetch data without checking that the user is allowed to see it. Guessing sequential ids then exposes other people's data. The fix is to authorize every lookup, not to hide the ids.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -503,6 +546,10 @@ A: All API calls go through one request() helper. If the server returns 401 for 
 | 7 | White page: `Failed to resolve import "./auth/AuthContext"` | Wrong folder or file name (case matters) | Fixed the folder and file names to match the import paths |
 | 7 | Browser blocked requests that carry the `Authorization` header (CORS preflight error) | The backend CORS config did not explicitly allow the header | Added `.allowedHeaders("*")` in `WebConfig` and restarted the backend |
 | 7 | Expired token caused 401 even on open endpoints like `/api/chat` | The bearer-token filter validates any token that is sent, even to `permitAll` endpoints | Skipped the token for login/register and made `request()` clear the token and log out on a 401 |
+| 8 | Backend would not start after adding `user_id` (null or foreign key error) | The `conversations` table still had old rows with no owner, and the new column is required | Deleted old rows from `messages` and `conversations`, then restarted |
+| 8 | MySQL Workbench error 1175 on `DELETE` | Safe-update mode refuses a DELETE with no key in the WHERE clause | Added `WHERE id > 0` |
+| 8 | MySQL error 1451 deleting conversations | Messages still pointed to them | Deleted from `messages` first, then `conversations` |
+| 8 | Everything returned 401 in PowerShell tests | The saved token was older than 60 minutes or missing | Logged in again to get a fresh token |
 
 ---
 
@@ -534,3 +581,4 @@ Copy this each time we add a tool:
 | 5 | Duplicate email and validation errors all returned 403 instead of 409 / 400 | Spring forwards errors internally to `/error`, and Spring Security's `anyRequest().authenticated()` rule blocked that path, hiding the real status code | Added `.requestMatchers("/error").permitAll()` to the security config |
 | 6 | Marked Spring Security + JWT as in use; added JWT library choice, token lifetime, login error handling; updated known limitations |
 | 7 | Added token storage, auth Context, request helper, and no-router decisions; updated fetch-vs-Axios note and known limitations |
+| 8 | Added ownership model, IDOR prevention, 404-vs-403 and data migration decisions; closed the temporary open endpoints |
