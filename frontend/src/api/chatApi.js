@@ -8,6 +8,11 @@ export function sendMessage(message, conversationId) {
   });
 }
 
+export function fetchConversations() {
+  // returns [{ id, title, createdAt }, ...] for the logged-in user, newest first
+  return request("/conversations");
+}
+
 export async function fetchMessages(conversationId) {
   try {
     const data = await request(`/conversations/${conversationId}/messages`);
