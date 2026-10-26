@@ -542,13 +542,10 @@ A: Insecure Direct Object Reference: the app uses an id from the request to fetc
 | 6 | App refused to start: secret too short | HS256 needs at least 32 bytes, and my secret was shorter | Generated a new 48-byte random secret |
 | 6 | `/api/auth/me` returned 200 without a token | The wildcard `/api/auth/**` was still permitted from Day 5 | Replaced it with specific matchers for POST `/register` and `/login` only |
 | 6 | Compile errors on JWT classes | The dependency had not downloaded yet | Synchronized the Maven project and ran `.\mvnw clean` |
-| 7 | White page: `useAuth must be used inside <AuthProvider>` | `main.jsx` still rendered `<App />` without the provider | Wrapped `<App />` in `<AuthProvider>` in `main.jsx` |
 | 7 | White page: `Failed to resolve import "./auth/AuthContext"` | Wrong folder or file name (case matters) | Fixed the folder and file names to match the import paths |
 | 7 | Browser blocked requests that carry the `Authorization` header (CORS preflight error) | The backend CORS config did not explicitly allow the header | Added `.allowedHeaders("*")` in `WebConfig` and restarted the backend |
 | 7 | Expired token caused 401 even on open endpoints like `/api/chat` | The bearer-token filter validates any token that is sent, even to `permitAll` endpoints | Skipped the token for login/register and made `request()` clear the token and log out on a 401 |
 | 8 | Backend would not start after adding `user_id` (null or foreign key error) | The `conversations` table still had old rows with no owner, and the new column is required | Deleted old rows from `messages` and `conversations`, then restarted |
-| 8 | MySQL Workbench error 1175 on `DELETE` | Safe-update mode refuses a DELETE with no key in the WHERE clause | Added `WHERE id > 0` |
-| 8 | MySQL error 1451 deleting conversations | Messages still pointed to them | Deleted from `messages` first, then `conversations` |
 | 8 | Everything returned 401 in PowerShell tests | The saved token was older than 60 minutes or missing | Logged in again to get a fresh token |
 
 ---
