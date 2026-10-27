@@ -8,3 +8,10 @@ spring.jpa.open-in-view=false
 
 app.jwt.secret=PUT_A_LONG_RANDOM_SECRET_HERE
 app.jwt.expiry-minutes=60
+
+# Use "fake" to run without a key, or "anthropic" for the real AI
+app.ai.provider=fake
+app.ai.api-key=PUT_YOUR_API_KEY_HERE
+app.ai.model=PUT_A_MODEL_ID_HERE
+app.ai.max-tokens=1024
+app.ai.timeout-seconds=60
