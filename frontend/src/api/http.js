@@ -38,6 +38,9 @@ function defaultMessage(status) {
   if (status === 401) return "Your session expired. Please log in again.";
   if (status === 404) return "Not found.";
   if (status === 409) return "That already exists.";
+  if (status === 502 || status === 503 || status === 504) {
+    return "The AI service is unavailable right now. Please try again in a moment.";
+  }
   if (status >= 500) return "Something went wrong on the server.";
   return "Request failed (" + status + ").";
 }
