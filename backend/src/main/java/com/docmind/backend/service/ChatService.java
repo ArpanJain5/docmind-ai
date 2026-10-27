@@ -1,5 +1,8 @@
 package com.docmind.backend.service;
 
+import com.docmind.backend.ai.AiException;
+import com.docmind.backend.ai.AiMessage;
+import com.docmind.backend.ai.AiService;
 import com.docmind.backend.dto.ChatResponse;
 import com.docmind.backend.dto.ConversationSummary;
 import com.docmind.backend.dto.MessageResponse;
@@ -19,16 +22,27 @@ import java.util.List;
 @Service
 public class ChatService {
 
+    private static final String SYSTEM_PROMPT =
+            "You are DocMind, a helpful assistant inside the DocMind AI workspace. "
+            + "Answer clearly and concisely. If you are not sure about something, say so "
+            + "instead of guessing.";
+
+    // The AI has no memory, so we resend recent messages. A cap keeps cost predictable.
+    private static final int MAX_HISTORY_MESSAGES = 20;
+
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final AiService aiService;
 
     public ChatService(ConversationRepository conversationRepository,
                        MessageRepository messageRepository,
-                       UserRepository userRepository) {
+                       UserRepository userRepository,
+                       AiService aiService) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
+        this.aiService = aiService;
     }
 
     public ChatResponse chat(Long userId, Long conversationId, String userMessage) {
@@ -39,9 +53,8 @@ public class ChatService {
 
         messageRepository.save(new Message(conversation, Role.USER, userMessage));
 
-        // The slow part (later: the real AI call). We deliberately do NOT keep a
-        // database transaction open while waiting for it.
-        String reply = generateReply(userMessage);
+        // The slow call. We deliberately do NOT keep a database transaction open during it.
+        String reply = askAi(conversation.getId());
 
         messageRepository.save(new Message(conversation, Role.ASSISTANT, reply));
 
@@ -63,6 +76,22 @@ public class ChatService {
                 .toList();
     }
 
+    private String askAi(Long conversationId) {
+        List<Message> all = messageRepository.findByConversationIdOrderByIdAsc(conversationId);
+        List<Message> recent = all.subList(Math.max(0, all.size() - MAX_HISTORY_MESSAGES), all.size());
+        List<AiMessage> history = recent.stream()
+                .map(m -> new AiMessage(m.getRole(), m.getContent()))
+                .toList();
+
+        try {
+            return aiService.complete(SYSTEM_PROMPT, history);
+        } catch (AiException e) {
+            // 502 = "the service behind me failed". The details stay in our logs.
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY, "The AI service is unavailable", e);
+        }
+    }
+
     // The one place that decides "is this chat yours?"
     private Conversation findOwnedConversation(Long userId, Long conversationId) {
         return conversationRepository.findByIdAndUserId(conversationId, userId)
@@ -79,15 +108,5 @@ public class ChatService {
     private String makeTitle(String firstMessage) {
         String clean = firstMessage.strip();
         return clean.length() <= 40 ? clean : clean.substring(0, 40) + "...";
-    }
-
-    private String generateReply(String userMessage) {
-        // Pretend the AI is thinking (real AI calls take 1-5 seconds).
-        try {
-            Thread.sleep(800);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-        return "You said: \"" + userMessage + "\". (Testing Reply!)";
     }
 }
