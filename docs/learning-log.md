@@ -74,3 +74,11 @@
 - Closed the temporary open endpoints: chat and conversations now require a token
 - Tested with two users in PowerShell (401, 404, 404, own chat works)
 - Built a "My chats" sidebar in React
+
+## Day 9
+- Put the AI behind an AiService interface with two implementations: a fake one and a real one, chosen by app.ai.provider
+- Called a real AI API with Spring's RestClient: API key header, version header, system prompt, max_tokens, and timeouts
+- Learned: the AI API is stateless, so the app resends the last 20 messages each time
+- Learned: keep the API key in a git-ignored file, and verify with git grep --cached before committing
+- Handled failures: provider errors and timeouts become a 502 plus a friendly message, with details only in the logs
+- Tested: memory within a chat, no memory in a new chat, wrong key, timeout, and a misspelled provider name

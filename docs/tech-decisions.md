@@ -78,6 +78,11 @@
 | 41 | Response for someone else's chat | 404 Not Found (not 403) | ✅ |
 | 42 | Chat ownership model | `Conversation` many-to-one `User` | ✅ |
 | 43 | Dev data migration | Delete old test data before adding the required `user_id` | ✅ |
+| 44 | AI abstraction | `AiService` interface with fake and real implementations | ✅ |
+| 45 | HTTP client for the AI call | Spring `RestClient` | ✅ |
+| 46 | Chat memory strategy | Resend the last 20 messages each call | ✅ |
+| 47 | AI failure handling | `AiException`, then 502 to the client, details only in logs | ✅ |
+| 48 | AI secrets | API key in git-ignored `application-local.properties` | ✅ |
 
 ---
 
@@ -190,7 +195,7 @@
   - *CRA:* No longer maintained and slow, so React's own docs no longer recommend it.
   - *Next.js:* Powerful (server rendering, routing) but adds concepts we don't need, since our backend is Spring Boot.
 
-### 3.14 LLM API (AI provider) 🔜
+### 3.14 LLM API (AI provider) ✅
 - **What:** An external AI model we call over HTTPS to chat, summarize, write emails, check resumes, and detect spam.
 - **Why we chose it:** Hosted models give high quality without GPUs or training. Most of our features are the same call with different **prompts**.
 - **Alternatives:** OpenAI, Google Gemini, local models (Ollama, Llama), training our own model, Hugging Face.
@@ -200,6 +205,8 @@
   - *Which hosted provider:* To be finalized. We'll hide the provider behind an `AiService` interface so we can swap providers without changing controllers.
 - **Spam detector note:** A traditional ML classifier (Naive Bayes, etc.) is cheaper at scale, but an LLM needs no training data, so it's the faster option for this project. We note the trade-off in interviews.
 - **Security rule:** The API key lives in an environment variable and is never committed. The browser never sees it, because only the backend calls the AI.
+- **Decision (Day 9):** We started with the Grok API. It has a single HTTPS endpoint, simple authentication (an API key header), clear documentation, and models with large context windows, which should help with PDF chat later. I have not benchmarked providers against each other yet. Because the provider sits behind `AiService`, comparing OpenAI, Gemini, or a local model means writing one new class, and the result of that comparison will be recorded here.
+- **Dev tip:** Use the small, cheap model tier for development, and the fake provider for work that doesn't need real AI.
 
 ### 3.15 Apache PDFBox 🔜
 - **What:** Java library to read text out of PDF files.
@@ -467,13 +474,43 @@
 - **Why not those:** The data was throwaway test data. In production we'd use a Flyway migration that adds the column, backfills it, and then makes it required.
 - **Interview line:** "I deleted dev data instead of inventing owners. In production I'd write a migration that backfills first."
 
-### 3.36 Known limitations: update this section ✅
-- Remove the bullet about open chat endpoints. Chat and conversations now require a token and an ownership check.
-- Keep the others, and add:
-  - **No delete or rename** of chats yet.
-  - **The chat list is not paginated.** It loads every conversation for the user.
-  - **Tokens last 60 minutes** and live in localStorage (see 3.40).
-  - **The AI reply is still fake.**
+### 3.47 AiService interface with a fake and a real implementation ✅
+- **What:** `ChatService` talks to an `AiService` interface. `FakeAiService` and `GrokAiService` implement it, and the property `app.ai.provider` chooses one at startup.
+- **Why we chose it:** The rest of the app doesn't know which provider is used, so swapping or adding providers touches one class. The fake provider lets us develop, demo, and test with no key, no cost, and no internet.
+- **Alternatives:** Calling the provider directly from `ChatService`, using the provider's official SDK, using Spring AI.
+- **Why not those:**
+  - *Direct call:* Locks the whole app to one provider and makes testing cost money.
+  - *Provider SDK:* Convenient, but it ties our code to one vendor and hides the HTTP details we are here to learn.
+  - *Spring AI:* A real option that already offers a provider-neutral API. I want to understand the raw HTTP first, then evaluate Spring AI as an upgrade.
+- **Interview line:** "I hid the AI behind an interface, with a fake implementation for tests and a real one for production, selected by configuration."
+
+### 3.48 RestClient for calling the AI API ✅
+- **What:** Spring's `RestClient` sends the HTTPS request, with explicit connect and read timeouts.
+- **Why we chose it:** It's the current synchronous HTTP client in Spring, simple to read, and it needs no extra dependency.
+- **Alternatives:** `WebClient` (reactive), `RestTemplate` (older), the JDK `HttpClient` directly, a provider SDK.
+- **Why not those:** `WebClient` brings in reactive programming we don't use. `RestTemplate` is in maintenance mode. A raw `HttpClient` needs manual JSON handling.
+- **Note:** The JSON response is read into small records with `@JsonIgnoreProperties(ignoreUnknown = true)`, so new fields from the provider don't break us.
+
+### 3.49 Conversation memory: resend the last 20 messages ✅
+- **What:** The AI API is stateless. On each call we send the system prompt plus up to the last 20 messages of that conversation.
+- **Why we chose it:** It's the simplest approach that works, and a cap keeps cost and speed predictable.
+- **Alternatives:** Send the whole history, summarize older messages, store embeddings and retrieve the relevant ones.
+- **Why not those:** The whole history grows cost and latency without bound and can exceed the model's limit. Summaries and retrieval are good upgrades, but need more machinery.
+- **Trade-off:** In a long chat the AI forgets anything older than 20 messages.
+- **Tidying:** The adapter drops a leading assistant message and merges consecutive messages from the same role, since an earlier failed call can leave two user messages in a row.
+
+### 3.50 Failure handling, timeouts, and cost controls ✅
+- **What:** Provider errors, network failures, and timeouts become an `AiException`. `ChatService` turns that into `502 Bad Gateway`, and React shows a friendly message. Details go to the logs, without secrets. Calls have a 10-second connect timeout and a 60-second read timeout.
+- **Why we chose it:** AI calls are slow, and they fail in ways our own database never does. Users should not see raw provider errors, and a hung request should not hang our server.
+- **Cost controls:** `max_tokens`, a 4000-character message limit, a 20-message history cap, login required, and a spending limit set at the provider.
+- **Not done yet:** rate limiting per user, retries with backoff, and streaming replies.
+- **Known gap:** If the AI fails, the user's message is already saved without a reply. A retry would add a second copy of it.
+- **Interview line:** "I treat the AI call as an unreliable dependency: timeouts, an error mapped to 502, no secrets in logs, and a fake implementation so everything else still works if the provider is down."
+
+### 3.36 Known limitations: add these bullets ✅
+- **Replies show raw text.** Markdown from the AI (bold, lists, code) isn't rendered yet.
+- **No streaming.** The user waits for the full reply before seeing anything.
+- **No per-user rate limiting or retry button.**
 
 ---
 
@@ -524,6 +561,15 @@ A: Every conversation query includes the owner's id taken from the verified JWT,
 **Q: What is IDOR?**
 A: Insecure Direct Object Reference: the app uses an id from the request to fetch data without checking that the user is allowed to see it. Guessing sequential ids then exposes other people's data. The fix is to authorize every lookup, not to hide the ids.
 
+**Q: How does the AI remember the conversation?**
+A: It doesn't. The AI API is stateless, so on every request I send the system prompt plus the last 20 messages from my database. A new conversation starts with no history, which I tested.
+
+**Q: How would you switch to a different AI provider?**
+A: The chat code depends on an AiService interface. I'd write one new implementation class and change one setting, so no controller or screen changes.
+
+**Q: What happens if the AI provider is down or slow?**
+A: Timeouts stop the call from hanging, the failure becomes a 502 with a friendly message, and the details are logged without secrets. The rest of the app, including history and login, keeps working.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -547,6 +593,10 @@ A: Insecure Direct Object Reference: the app uses an id from the request to fetc
 | 7 | Expired token caused 401 even on open endpoints like `/api/chat` | The bearer-token filter validates any token that is sent, even to `permitAll` endpoints | Skipped the token for login/register and made `request()` clear the token and log out on a 401 |
 | 8 | Backend would not start after adding `user_id` (null or foreign key error) | The `conversations` table still had old rows with no owner, and the new column is required | Deleted old rows from `messages` and `conversations`, then restarted |
 | 8 | Everything returned 401 in PowerShell tests | The saved token was older than 60 minutes or missing | Logged in again to get a fresh token |
+| 9 | Backend failed to start: no bean of type `AiService` | `app.ai.provider` was missing or misspelled, so neither implementation was created | Set it to `fake` or `grok` exactly |
+| 9 | AI call failed with HTTP 401 | The API key was wrong, or was pasted with quotes or spaces | Pasted the key again with no quotes or spaces and restarted |
+| 9 | AI call failed with HTTP 404 about the model | The model ID in `app.ai.model` was wrong or retired | Copied a current model ID from the provider's models page |
+| 9 | AI call failed with a billing or credit error | The provider account had no credit | Added credit and set a spending limit in the console |
 
 ---
 
@@ -579,3 +629,4 @@ Copy this each time we add a tool:
 | 6 | Marked Spring Security + JWT as in use; added JWT library choice, token lifetime, login error handling; updated known limitations |
 | 7 | Added token storage, auth Context, request helper, and no-router decisions; updated fetch-vs-Axios note and known limitations |
 | 8 | Added ownership model, IDOR prevention, 404-vs-403 and data migration decisions; closed the temporary open endpoints |
+| 9 | Chose the AI provider; added AiService interface, RestClient, memory strategy, and failure/cost-control decisions; updated known limitations |
