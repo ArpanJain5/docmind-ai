@@ -23,61 +23,53 @@ import java.util.Map;
 
 @Service
 @ConditionalOnProperty(name = "app.ai.provider", havingValue = "groq")
-public class GeminiAiService implements AiService {
+public class GroqAiService implements AiService {
 
     private static final Logger log =
-            LoggerFactory.getLogger(GeminiAiService.class);
-
-    private static final String BASE_URL =
-            "https://api.groq.com/openai/v1";
+            LoggerFactory.getLogger(GroqAiService.class);
 
     private final RestClient restClient;
     private final String model;
     private final int maxTokens;
 
-    public GeminiAiService(
+    public GroqAiService(
             @Value("${app.ai.api-key}") String apiKey,
             @Value("${app.ai.model}") String model,
+            @Value("${app.ai.base-url:https://api.groq.com/openai/v1}") String baseUrl,
             @Value("${app.ai.max-tokens:1024}") int maxTokens,
             @Value("${app.ai.timeout-seconds:60}") long timeoutSeconds) {
 
         if (apiKey == null || apiKey.isBlank()) {
-            throw new IllegalStateException(
-                    "app.ai.api-key is missing");
+            throw new IllegalStateException("app.ai.api-key is missing");
         }
 
         this.model = model;
         this.maxTokens = maxTokens;
 
+        // Never wait forever for someone else's server
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
 
         JdkClientHttpRequestFactory requestFactory =
                 new JdkClientHttpRequestFactory(httpClient);
-
-        requestFactory.setReadTimeout(
-                Duration.ofSeconds(timeoutSeconds));
+        requestFactory.setReadTimeout(Duration.ofSeconds(timeoutSeconds));
 
         this.restClient = RestClient.builder()
-                .baseUrl(BASE_URL)
+                .baseUrl(baseUrl.replaceAll("/+$", "")) // no trailing slash
                 .requestFactory(requestFactory)
-                .defaultHeader(
-                        "Authorization", "Bearer " + apiKey)
+                .defaultHeader("Authorization", "Bearer " + apiKey)
                 .build();
     }
 
     @Override
-    public String complete(
-            String systemPrompt,
-            List<AiMessage> history) {
+    public String complete(String systemPrompt, List<AiMessage> history) {
 
-        List<Map<String, String>> messages =
-                toApiMessages(systemPrompt, history);
+        List<Map<String, String>> messages = toApiMessages(systemPrompt, history);
 
+        // The first entry is the system prompt, so we need at least one more
         if (messages.size() <= 1) {
-            throw new AiException(
-                    "There is no user message to send");
+            throw new AiException("There is no user message to send");
         }
 
         Map<String, Object> body = new LinkedHashMap<>();
@@ -96,59 +88,45 @@ public class GeminiAiService implements AiService {
                     .body(ChatCompletionResponse.class);
 
         } catch (RestClientResponseException e) {
-            log.warn("Groq API returned HTTP {}: {}",
+            // The provider answered with an error (401 bad key, 404 bad model, 429 rate limit...)
+            log.warn("AI provider returned HTTP {}: {}",
                     e.getStatusCode().value(),
                     shorten(e.getResponseBodyAsString()));
-
             throw new AiException(
-                    "AI provider returned HTTP "
-                            + e.getStatusCode().value(), e);
+                    "AI provider returned HTTP " + e.getStatusCode().value(), e);
 
         } catch (ResourceAccessException e) {
-            log.warn("Could not reach Groq API: {}",
-                    e.getMessage());
-
-            throw new AiException(
-                    "Could not reach the AI provider", e);
+            // Network problem or timeout
+            log.warn("Could not reach the AI provider: {}", e.getMessage());
+            throw new AiException("Could not reach the AI provider", e);
 
         } catch (RestClientException e) {
-            log.warn("Unexpected Groq API response: {}",
-                    e.getMessage());
-
-            throw new AiException(
-                    "Unexpected AI response", e);
+            log.warn("Unexpected AI response: {}", e.getMessage());
+            throw new AiException("Unexpected AI response", e);
         }
 
         String text = extractText(response);
 
         if (text.isBlank()) {
-            throw new AiException(
-                    "The AI returned an empty reply");
+            throw new AiException("The AI returned an empty reply");
         }
 
         return text;
     }
 
     private List<Map<String, String>> toApiMessages(
-            String systemPrompt,
-            List<AiMessage> history) {
+            String systemPrompt, List<AiMessage> history) {
 
-        List<Map<String, String>> messages =
-                new ArrayList<>();
+        List<Map<String, String>> messages = new ArrayList<>();
 
-        // OpenAI-compatible APIs support a system message.
+        // OpenAI-compatible APIs accept the instructions as a "system" message
         messages.add(Map.of(
                 "role", "system",
-                "content",
-                systemPrompt == null ? "" : systemPrompt));
+                "content", systemPrompt == null ? "" : systemPrompt));
 
+        // Keep the saved order exactly as it is
         for (AiMessage message : history) {
-            String role = message.role() == Role.USER
-                    ? "user"
-                    : "assistant";
-
-            // Keep the original message sequence. Do not merge
-            // consecutive messages or discard earlier assistant replies.
+            String role = message.role() == Role.USER ? "user" : "assistant";
             messages.add(Map.of(
                     "role", role,
                     "content", message.content()));
@@ -157,9 +135,7 @@ public class GeminiAiService implements AiService {
         return messages;
     }
 
-    private String extractText(
-            ChatCompletionResponse response) {
-
+    private String extractText(ChatCompletionResponse response) {
         if (response == null
                 || response.choices() == null
                 || response.choices().isEmpty()) {
@@ -168,8 +144,7 @@ public class GeminiAiService implements AiService {
 
         Choice choice = response.choices().get(0);
 
-        if (choice.message() == null
-                || choice.message().content() == null) {
+        if (choice.message() == null || choice.message().content() == null) {
             return "";
         }
 
@@ -180,21 +155,19 @@ public class GeminiAiService implements AiService {
         if (text == null) {
             return "";
         }
-
-        return text.length() <= 300
-                ? text
-                : text.substring(0, 300) + "...";
+        return text.length() <= 300 ? text : text.substring(0, 300) + "...";
     }
 
+    // The slice of the provider's JSON that we care about
     @JsonIgnoreProperties(ignoreUnknown = true)
     record ChatCompletionResponse(List<Choice> choices) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record Choice(Message message) {
+    record Choice(ReplyMessage message) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record Message(String role, String content) {
+    record ReplyMessage(String role, String content) {
     }
 }
