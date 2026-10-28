@@ -15,6 +15,7 @@ import com.docmind.backend.repository.MessageRepository;
 import com.docmind.backend.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
@@ -46,15 +47,28 @@ public class ChatService {
     }
 
     public ChatResponse chat(Long userId, Long conversationId, String userMessage) {
-        Conversation conversation = (conversationId == null)
+        boolean isNewChat = (conversationId == null);
+
+        Conversation conversation = isNewChat
                 ? conversationRepository.save(
                         new Conversation(findUser(userId), makeTitle(userMessage)))
                 : findOwnedConversation(userId, conversationId);
 
-        messageRepository.save(new Message(conversation, Role.USER, userMessage));
+        Message savedUserMessage =
+                messageRepository.save(new Message(conversation, Role.USER, userMessage));
 
         // The slow call. We deliberately do NOT keep a database transaction open during it.
-        String reply = askAi(conversation.getId());
+        String reply;
+        try {
+            reply = askAi(conversation.getId());
+        } catch (ResponseStatusException e) {
+            // The AI failed: undo what we saved, so no half-finished exchange is left behind
+            messageRepository.deleteById(savedUserMessage.getId());
+            if (isNewChat) {
+                conversationRepository.deleteById(conversation.getId());
+            }
+            throw e;
+        }
 
         messageRepository.save(new Message(conversation, Role.ASSISTANT, reply));
 
@@ -74,6 +88,21 @@ public class ChatService {
                 .stream()
                 .map(MessageResponse::from)
                 .toList();
+    }
+
+    // Messages first, then the conversation, all or nothing
+    @Transactional
+    public void deleteConversation(Long userId, Long conversationId) {
+        Conversation conversation = findOwnedConversation(userId, conversationId);
+        messageRepository.deleteByConversationId(conversation.getId());
+        conversationRepository.delete(conversation);
+    }
+
+    @Transactional
+    public ConversationSummary renameConversation(Long userId, Long conversationId, String title) {
+        Conversation conversation = findOwnedConversation(userId, conversationId);
+        conversation.setTitle(title.strip());
+        return ConversationSummary.from(conversation);
     }
 
     private String askAi(Long conversationId) {
