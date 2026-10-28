@@ -207,6 +207,10 @@
 - **Security rule:** The API key lives in an environment variable and is never committed. The browser never sees it, because only the backend calls the AI.
 - **Decision (Day 9):** We started with the Grok API. It has a single HTTPS endpoint, simple authentication (an API key header), clear documentation, and models with large context windows, which should help with PDF chat later. I have not benchmarked providers against each other yet. Because the provider sits behind `AiService`, comparing OpenAI, Gemini, or a local model means writing one new class, and the result of that comparison will be recorded here.
 - **Dev tip:** Use the small, cheap model tier for development, and the fake provider for work that doesn't need real AI.
+- **Decision (Day 9):** We use the Groq API on its free tier with the open-weight model `openai/gpt-oss-120b`, because I have no budget for a paid API. Groq exposes an OpenAI-compatible `/chat/completions` endpoint. As of October 2026 its published free limits for this model are 30 requests/min, 1,000 requests/day, 8,000 tokens/min, and 200,000 tokens/day (these change, so re-check).
+- **Why not a paid provider (Grok, OpenAI):** Cost. Because of the `AiService` interface, switching later means writing one class or changing a base URL.
+- **Trade-offs:** Free tiers have rate limits, quality differs by model, and prompts may be handled under the provider's free-tier data terms, so I will not send private documents until I have read them.
+- **Other free options considered:** Google Gemini, OpenRouter free models, Mistral free mode, and local Ollama.
 
 ### 3.15 Apache PDFBox 🔜
 - **What:** Java library to read text out of PDF files.
@@ -475,7 +479,7 @@
 - **Interview line:** "I deleted dev data instead of inventing owners. In production I'd write a migration that backfills first."
 
 ### 3.47 AiService interface with a fake and a real implementation ✅
-- **What:** `ChatService` talks to an `AiService` interface. `FakeAiService` and `GrokAiService` implement it, and the property `app.ai.provider` chooses one at startup.
+- **What:** `ChatService` talks to an `AiService` interface. `FakeAiService` and `GroqAiService` implement it, and the property `app.ai.provider` chooses one at startup.
 - **Why we chose it:** The rest of the app doesn't know which provider is used, so swapping or adding providers touches one class. The fake provider lets us develop, demo, and test with no key, no cost, and no internet.
 - **Alternatives:** Calling the provider directly from `ChatService`, using the provider's official SDK, using Spring AI.
 - **Why not those:**
