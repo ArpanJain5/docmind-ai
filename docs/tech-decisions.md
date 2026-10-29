@@ -42,12 +42,12 @@
 | 5 | Build tool | Maven | ✅ |
 | 6 | Boilerplate reduction | Lombok | ✅ |
 | 7 | Dev productivity | Spring Boot DevTools | ✅ |
-| 8 | Database | MySQL | 🔜 (Week 2) |
-| 9 | Data access | Spring Data JPA (Hibernate) | 🔜 |
-| 10 | Authentication | Spring Security + JWT | 🔜 |
-| 11 | Frontend library | React | 🔜 (Day 2) |
-| 12 | Frontend tooling | Vite | 🔜 (Day 2) |
-| 13 | AI provider | LLM API (Claude / OpenAI) | 🔜 |
+| 8 | Database | MySQL | ✅ (Week 2) |
+| 9 | Data access | Spring Data JPA (Hibernate) | ✅ |
+| 10 | Authentication | Spring Security + JWT | ✅ |
+| 11 | Frontend library | React | ✅ (Day 2) |
+| 12 | Frontend tooling | Vite | ✅ (Day 2) |
+| 13 | Groq API (free tier, OpenAI-compatible), behind an AiService interface ✅
 | 14 | PDF text extraction | Apache PDFBox | 🔜 |
 | 15 | Chat-with-PDF approach | Chunking + retrieval (RAG) | 🔜 |
 | 16 | Secrets handling | Environment variables | 🔜 |
@@ -207,8 +207,8 @@
 - **Security rule:** The API key lives in an environment variable and is never committed. The browser never sees it, because only the backend calls the AI.
 - **Decision (Day 9):** We started with the Grok API. It has a single HTTPS endpoint, simple authentication (an API key header), clear documentation, and models with large context windows, which should help with PDF chat later. I have not benchmarked providers against each other yet. Because the provider sits behind `AiService`, comparing OpenAI, Gemini, or a local model means writing one new class, and the result of that comparison will be recorded here.
 - **Dev tip:** Use the small, cheap model tier for development, and the fake provider for work that doesn't need real AI.
-- **Decision (Day 9):** We use the Groq API on its free tier with the open-weight model `openai/gpt-oss-120b`, because I have no budget for a paid API. Groq exposes an OpenAI-compatible `/chat/completions` endpoint. As of October 2026 its published free limits for this model are 30 requests/min, 1,000 requests/day, 8,000 tokens/min, and 200,000 tokens/day (these change, so re-check).
-- **Why not a paid provider (Grok, OpenAI):** Cost. Because of the `AiService` interface, switching later means writing one class or changing a base URL.
+- **Decision (Day 9):** We use the groq API on its free tier with the open-weight model `openai/gpt-oss-120b`, because I have no budget for a paid API. Groq exposes an OpenAI-compatible `/chat/completions` endpoint. As of October 2026 its published free limits for this model are 30 requests/min, 1,000 requests/day, 8,000 tokens/min, and 200,000 tokens/day (these change, so re-check).
+- **Why not a paid provider (Anthropic, OpenAI):** Cost. Because of the `AiService` interface, switching later means writing one class or changing a base URL.
 - **Trade-offs:** Free tiers have rate limits, quality differs by model, and prompts may be handled under the provider's free-tier data terms, so I will not send private documents until I have read them.
 - **Other free options considered:** Google Gemini, OpenRouter free models, Mistral free mode, and local Ollama.
 
@@ -511,10 +511,15 @@
 - **Known gap:** If the AI fails, the user's message is already saved without a reply. A retry would add a second copy of it.
 - **Interview line:** "I treat the AI call as an unreliable dependency: timeouts, an error mapped to 502, no secrets in logs, and a fake implementation so everything else still works if the provider is down."
 
-### 3.36 Known limitations: add these bullets ✅
+### 3.36 Known limitations (updated) ✅
 - **Replies show raw text.** Markdown from the AI (bold, lists, code) isn't rendered yet.
 - **No streaming.** The user waits for the full reply before seeing anything.
-- **No per-user rate limiting or retry button.**
+- **Token in localStorage** is readable by injected scripts (see 3.40).
+- **No refresh tokens:** users must log in again after 60 minutes.
+- **No rate limiting** on register, login, or the AI endpoint, and no email verification.
+- **If the backend is down on page load,** the user sees the login screen even with a saved token.
+- **Free-tier AI limits:** an HTTP 429 from the provider can interrupt long chats.
+- **Deleting a chat uses `window.confirm`** and cannot be undone.
 
 ---
 
@@ -601,6 +606,11 @@ A: Timeouts stop the call from hanging, the failure becomes a 502 with a friendl
 | 9 | AI call failed with HTTP 401 | The API key was wrong, or was pasted with quotes or spaces | Pasted the key again with no quotes or spaces and restarted |
 | 9 | AI call failed with HTTP 404 about the model | The model ID in `app.ai.model` was wrong or retired | Copied a current model ID from the provider's models page |
 | 9 | AI call failed with a billing or credit error | The provider account had no credit | Added credit and set a spending limit in the console |
+| 10 | PowerShell tests returned 401 about a minute after logging in | `app.jwt.expiry-minutes` was still `1` from the expiry test | Set it back to `60` and logged in again |
+| 10 | API key and JWT secret appeared in a screenshot and a chat message | Shared the real properties file instead of the `.example` file | Revoked the key, generated a new JWT secret, and now share only placeholders |
+| 10 | Backend failed to start: `Access denied for user 'docmind_user'` then `Unable to determine Dialect` | The properties file still contained placeholder text instead of the real password and secret; the Dialect error was only a side effect of having no connection | Put real values in `application-local.properties` and read the first `Caused by:` line |
+| 10 | The rename (pencil) button did nothing, while delete worked | `window.prompt()` is not supported in VS Code's built-in browser | Replaced it with an inline rename input (Enter saves, Esc cancels) |
+| 10 | The chat area lost its styling | Original rules in `App.css` went missing after several edits | Replaced `App.css` with one complete, deduplicated file |
 
 ---
 
@@ -628,9 +638,9 @@ Copy this each time we add a tool:
 | 2 | Marked React and Vite as in use; added CORS, fetch, JavaScript, and ESLint decisions; added the CORS challenge |
 | 3 | Added JSON/DTO, controller-service layering, and React state decisions |
 | 4 | Marked MySQL and JPA as in use; added data model, credentials, schema management, transactions, and known-limitations decisions |
-| 5 | Added BCrypt, Bean Validation, email handling, security configuration decisions, and updated the known limitations |
-| 5 | Duplicate email and validation errors all returned 403 instead of 409 / 400 | Spring forwards errors internally to `/error`, and Spring Security's `anyRequest().authenticated()` rule blocked that path, hiding the real status code | Added `.requestMatchers("/error").permitAll()` to the security config |
-| 6 | Marked Spring Security + JWT as in use; added JWT library choice, token lifetime, login error handling; updated known limitations |
-| 7 | Added token storage, auth Context, request helper, and no-router decisions; updated fetch-vs-Axios note and known limitations |
+| 5 | Added BCrypt, Bean Validation, email handling, security configuration decisions; added the `/error` 403 challenge |
+| 6 | Marked Spring Security + JWT as in use; added JWT library choice, token lifetime, login error handling |
+| 7 | Added token storage, auth Context, request helper, and no-router decisions; updated fetch-vs-Axios note |
 | 8 | Added ownership model, IDOR prevention, 404-vs-403 and data migration decisions; closed the temporary open endpoints |
-| 9 | Chose the AI provider; added AiService interface, RestClient, memory strategy, and failure/cost-control decisions; updated known limitations |
+| 9 | Chose the free Groq provider; added AiService interface, RestClient, memory strategy, and failure/cost-control decisions |
+| 10 | Added delete, rename, and compensating-undo decisions; added Day 10 challenges; updated known limitations |

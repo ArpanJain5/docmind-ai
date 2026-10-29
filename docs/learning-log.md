@@ -3,8 +3,7 @@
 ## Day 0
 - Installed Git, Node, Java 21, MySQL
 - Created the GitHub repo and folder structure
-- add → commit → push
-
+- Learned: add, commit, push
 - Fixed PowerShell script error with Set-ExecutionPolicy
 - Moved project out of OneDrive to C:\Projects
 - Verified MySQL Workbench and VS Code extensions
@@ -82,3 +81,12 @@
 - Learned: keep the API key in a git-ignored file, and verify with git grep --cached before committing
 - Handled failures: provider errors and timeouts become a 502 plus a friendly message, with details only in the logs
 - Tested: memory within a chat, no memory in a new chat, wrong key, timeout, and a misspelled provider name
+- Chose Groq's free tier because I have no budget for a paid API, and wrote the OpenAI-compatible implementation myself
+
+## Day 10
+- Added PATCH /api/conversations/{id} (rename) and DELETE /api/conversations/{id}, both with the ownership check (404 for other users' chats)
+- Learned: delete in one transaction, messages first then the conversation; derived deletes need @Transactional
+- Learned: PATCH must be allowed in CORS, and a 204 response has no body to parse
+- A failed AI call now undoes the saved user message (and a new empty conversation), and React puts the text back in the box
+- Built inline rename and delete buttons in the sidebar (window.prompt is not supported in VS Code's browser)
+- Learned to rotate leaked secrets and to share only the .example config file
