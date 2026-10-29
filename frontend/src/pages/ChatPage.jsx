@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchConversations, fetchMessages, sendMessage } from "../api/chatApi";
+import {
+  deleteConversation,
+  fetchConversations,
+  fetchMessages,
+  renameConversation,
+  sendMessage,
+} from "../api/chatApi";
 import { useAuth } from "../auth/AuthContext";
 import "../App.css";
 
@@ -13,6 +19,8 @@ function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [opening, setOpening] = useState(false);
   const [conversations, setConversations] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [editingTitle, setEditingTitle] = useState("");
   const [conversationId, setConversationId] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     return saved ? Number(saved) : null;
@@ -67,6 +75,10 @@ function ChatPage() {
     }
   }
 
+  function showError(text) {
+    setMessages((prev) => [...prev, { role: "assistant", text, error: true }]);
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || busy) return;
@@ -86,14 +98,20 @@ function ChatPage() {
         refreshConversations(); // the new chat appears in the sidebar
       }
     } catch (error) {
+      // The server undoes a failed message, so we undo it on screen too
+      // and put the text back in the box, ready to send again.
       setMessages((prev) => [
-        ...prev,
+        ...prev.slice(0, -1),
         {
           role: "assistant",
-          text: "Sorry, something went wrong: " + error.message,
+          text:
+            "Sorry, something went wrong: " +
+            error.message +
+            " Your message is back in the box. Press Send to try again.",
           error: true,
         },
       ]);
+      setInput(text);
     } finally {
       setLoading(false);
     }
@@ -113,16 +131,50 @@ function ChatPage() {
       localStorage.setItem(STORAGE_KEY, String(id));
       setMessages(history.length > 0 ? history : [WELCOME]);
     } catch (error) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: "Could not open that chat: " + error.message,
-          error: true,
-        },
-      ]);
+      showError("Could not open that chat: " + error.message);
     } finally {
       setOpening(false);
+    }
+  }
+
+  // ---- rename: edit the title right in the sidebar ----
+  function startRename(chat) {
+    if (busy) return;
+    setEditingId(chat.id);
+    setEditingTitle(chat.title);
+  }
+
+  function cancelRename() {
+    setEditingId(null);
+  }
+
+  async function saveRename(chat) {
+    const clean = editingTitle.trim().slice(0, 120);
+    setEditingId(null);
+    if (!clean || clean === chat.title) return;
+
+    try {
+      const updated = await renameConversation(chat.id, clean);
+      setConversations((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } catch (error) {
+      showError("Could not rename the chat: " + error.message);
+    }
+  }
+
+  async function handleDelete(chat) {
+    if (busy) return;
+    if (!window.confirm(`Delete "${chat.title}"? This cannot be undone.`)) return;
+
+    try {
+      await deleteConversation(chat.id);
+      if (chat.id === conversationId) {
+        localStorage.removeItem(STORAGE_KEY);
+        setConversationId(null);
+        setMessages([WELCOME]);
+      }
+      await refreshConversations();
+    } catch (error) {
+      showError("Could not delete the chat: " + error.message);
     }
   }
 
@@ -149,15 +201,52 @@ function ChatPage() {
         )}
         <ul>
           {conversations.map((c) => (
-            <li key={c.id}>
-              <button
-                className={`chat-item${c.id === conversationId ? " active" : ""}`}
-                onClick={() => handleSelect(c.id)}
-                disabled={busy}
-                title={c.title}
-              >
-                {c.title}
-              </button>
+            <li key={c.id} className="chat-row">
+              {editingId === c.id ? (
+                <input
+                  className="rename-input"
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveRename(c);
+                    if (e.key === "Escape") cancelRename();
+                  }}
+                  onBlur={cancelRename}
+                  onFocus={(e) => e.target.select()}
+                  maxLength={120}
+                  aria-label="Chat name"
+                  autoFocus
+                />
+              ) : (
+                <>
+                  <button
+                    className={`chat-item${c.id === conversationId ? " active" : ""}`}
+                    onClick={() => handleSelect(c.id)}
+                    disabled={busy}
+                    title={c.title}
+                  >
+                    {c.title}
+                  </button>
+                  <button
+                    className="icon-btn"
+                    onClick={() => startRename(c)}
+                    disabled={busy}
+                    title="Rename"
+                    aria-label={`Rename ${c.title}`}
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    className="icon-btn"
+                    onClick={() => handleDelete(c)}
+                    disabled={busy}
+                    title="Delete"
+                    aria-label={`Delete ${c.title}`}
+                  >
+                    🗑️
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>

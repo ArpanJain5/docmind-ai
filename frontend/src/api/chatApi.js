@@ -24,3 +24,12 @@ export async function fetchMessages(conversationId) {
     throw error;
   }
 }
+
+export function renameConversation(id, title) {
+  // returns the updated { id, title, createdAt }
+  return request(`/conversations/${id}`, { method: "PATCH", body: { title } });
+}
+
+export function deleteConversation(id) {
+  return request(`/conversations/${id}`, { method: "DELETE" });
+}

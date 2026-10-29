@@ -77,5 +77,9 @@ export async function request(path, { method = "GET", body, skipAuth = false } =
     throw new ApiError(response.status, defaultMessage(response.status));
   }
 
+  if (response.status === 204) {
+    return null; // success with no body (like DELETE)
+  }
+
   return response.json();
 }
