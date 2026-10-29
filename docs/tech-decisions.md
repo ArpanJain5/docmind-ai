@@ -83,6 +83,9 @@
 | 46 | Chat memory strategy | Resend the last 20 messages each call | ✅ |
 | 47 | AI failure handling | `AiException`, then 502 to the client, details only in logs | ✅ |
 | 48 | AI secrets | API key in git-ignored `application-local.properties` | ✅ |
+| 52 | Rendering AI replies | `react-markdown` + `remark-gfm` (no raw HTML) | ✅ |
+| 53 | Copy to clipboard | Clipboard API with a fallback | ✅ |
+| 54 | Chat auto-scroll | Follow new messages only when the reader is at the bottom | ✅ |
 
 ---
 
@@ -511,7 +514,37 @@
 - **Known gap:** If the AI fails, the user's message is already saved without a reply. A retry would add a second copy of it.
 - **Interview line:** "I treat the AI call as an unreliable dependency: timeouts, an error mapped to 502, no secrets in logs, and a fake implementation so everything else still works if the provider is down."
 
-### 3.36 Known limitations (updated) ✅
+### 3.51 Safe Markdown rendering with react-markdown ✅
+- **What:** Assistant replies are rendered as Markdown (headings, lists, tables, code) by `react-markdown` with `remark-gfm`. Raw HTML is not enabled, and links open in a new tab with `rel="noopener noreferrer"`.
+- **Why we chose it:** It builds React elements instead of HTML strings, so there is no `innerHTML` and no script execution path. Unsafe URL schemes such as `javascript:` are neutralized by default.
+- **Alternatives:** `marked` or `markdown-it` with `dangerouslySetInnerHTML` plus DOMPurify, MDX, showing plain text.
+- **Why not those:**
+  - *HTML string + sanitizer:* Works, but one forgotten sanitize call or one sanitizer bypass is an XSS hole, and our JWT lives in localStorage.
+  - *MDX:* Meant for authored content, not untrusted text.
+  - *Plain text:* Safe but hard to read for lists, tables, and code.
+- **Trade-offs:** A small extra bundle size, and no syntax highlighting yet (a later option is `rehype-highlight`, which does not need raw HTML).
+- **Rule:** Never add `rehype-raw` or `dangerouslySetInnerHTML` for model output.
+- **Interview line:** "Model output is untrusted input. I render it with a library that builds React elements, so a malicious reply can't inject HTML or run script."
+
+### 3.52 Untrusted AI output (security note) ✅
+- **What:** Text from the model can contain anything a user (or, later, an uploaded PDF) told it to say. Treat it like user input.
+- **Why it matters:** An XSS in our page could read the token from localStorage (see 3.40). It will matter even more for chat with PDF, where a document can try to steer the model (prompt injection).
+- **How I checked:** With the fake provider echoing `<img onerror>`, a `<script>` tag, and a `javascript:` link, no code ran.
+
+### 3.53 Copy button copies the Markdown source ✅
+- **What:** The Copy button copies the original reply text, not the formatted result. It uses the Clipboard API, with a hidden-textarea fallback for restricted browsers.
+- **Why we chose it:** Users usually paste into docs, chats, or code editors that understand Markdown, and it avoids copying hidden formatting.
+- **Alternatives:** Copy rich HTML, a copy button per code block.
+- **Why not those (yet):** Rich copy needs more clipboard handling. A per-code-block Copy button is a good later improvement.
+- **Note:** The Clipboard API needs a secure context (HTTPS or localhost) and may be blocked in embedded browsers.
+
+### 3.54 Auto-scroll only when the reader is at the bottom ✅
+- **What:** A scroll listener records whether the reader is within about 80 pixels of the bottom. New messages scroll into view only then. Sending a message or opening a chat always jumps to the bottom.
+- **Why we chose it:** Always scrolling steals the reader's place when they scroll up to read.
+- **Alternatives:** Always scroll, never scroll, a floating "jump to latest" button.
+- **Why not those:** The first two are annoying in opposite ways, and the button is a later enhancement (it will matter more with streaming).
+
+### 3.36 Known limitations: update ✅
 - **Replies show raw text.** Markdown from the AI (bold, lists, code) isn't rendered yet.
 - **No streaming.** The user waits for the full reply before seeing anything.
 - **Token in localStorage** is readable by injected scripts (see 3.40).
@@ -520,6 +553,8 @@
 - **If the backend is down on page load,** the user sees the login screen even with a saved token.
 - **Free-tier AI limits:** an HTTP 429 from the provider can interrupt long chats.
 - **Deleting a chat uses `window.confirm`** and cannot be undone.
+- Remove "Replies show raw text".
+- Add: no syntax highlighting in code blocks, Copy copies Markdown (not rich text), no per-code-block Copy button, and messages use their list index as the React key.
 
 ---
 
@@ -579,6 +614,12 @@ A: The chat code depends on an AiService interface. I'd write one new implementa
 **Q: What happens if the AI provider is down or slow?**
 A: Timeouts stop the call from hanging, the failure becomes a 502 with a friendly message, and the details are logged without secrets. The rest of the app, including history and login, keeps working.
 
+**Q: How do you render AI responses safely?**
+A: I treat model output as untrusted input. I render it with react-markdown, which builds React elements instead of HTML strings, with raw HTML disabled. I tested it by making the app echo an img onerror, a script tag, and a javascript: link, and nothing ran. It matters because the JWT is in localStorage, so an XSS could steal it.
+
+**Q: Why not render Markdown with dangerouslySetInnerHTML and a sanitizer?**
+A: It can work, but safety then depends on remembering to sanitize every time and on the sanitizer having no bypass. A renderer that never produces HTML removes that whole class of bug.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -611,6 +652,10 @@ A: Timeouts stop the call from hanging, the failure becomes a 502 with a friendl
 | 10 | Backend failed to start: `Access denied for user 'docmind_user'` then `Unable to determine Dialect` | The properties file still contained placeholder text instead of the real password and secret; the Dialect error was only a side effect of having no connection | Put real values in `application-local.properties` and read the first `Caused by:` line |
 | 10 | The rename (pencil) button did nothing, while delete worked | `window.prompt()` is not supported in VS Code's built-in browser | Replaced it with an inline rename input (Enter saves, Esc cancels) |
 | 10 | The chat area lost its styling | Original rules in `App.css` went missing after several edits | Replaced `App.css` with one complete, deduplicated file |
+| 11 | `Failed to resolve import "react-markdown"` | The package was not installed (or the dev server was not restarted after installing) | Ran `npm install react-markdown remark-gfm` in `frontend` and restarted `npm run dev` |
+| 11 | Rendered replies had large blank gaps between paragraphs and list items | The bubble uses `white-space: pre-wrap`, which also keeps the newlines between the HTML elements Markdown generates | Set `white-space: normal` on the `.markdown` wrapper |
+| 11 | The Copy button did nothing in VS Code's built-in browser | The Clipboard API is restricted in that embedded browser | Added a fallback in `copyText` and tested the real behavior in Chrome |
+| 11 | Console warning about an invalid `node` prop on `<a>` | Spread all props from react-markdown onto the DOM element | Passed only `href` and `children` in the custom link component |
 
 ---
 
@@ -644,3 +689,4 @@ Copy this each time we add a tool:
 | 8 | Added ownership model, IDOR prevention, 404-vs-403 and data migration decisions; closed the temporary open endpoints |
 | 9 | Chose the free Groq provider; added AiService interface, RestClient, memory strategy, and failure/cost-control decisions |
 | 10 | Added delete, rename, and compensating-undo decisions; added Day 10 challenges; updated known limitations |
+| 11 | Added safe Markdown rendering, untrusted-output note, copy button, and auto-scroll decisions; updated known limitations |

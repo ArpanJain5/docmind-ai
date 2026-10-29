@@ -90,3 +90,11 @@
 - A failed AI call now undoes the saved user message (and a new empty conversation), and React puts the text back in the box
 - Built inline rename and delete buttons in the sidebar (window.prompt is not supported in VS Code's browser)
 - Learned to rotate leaked secrets and to share only the .example config file
+
+## Day 11
+- Rendered AI replies as Markdown with react-markdown and remark-gfm (lists, tables, code blocks)
+- Learned: AI output is untrusted input. Never inject it as raw HTML, because that allows XSS and token theft from localStorage
+- Tested the safety: HTML and javascript: links in a reply did nothing
+- Added a Copy button that copies the original Markdown text, with a fallback for browsers that restrict the Clipboard API
+- Auto-scroll now only follows new messages when the reader is already at the bottom
+- Extracted a MessageBubble component to keep ChatPage readable

@@ -12,6 +12,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - [x] Saved chat history, private to each user
 - [x] "My chats" sidebar: switch, rename, and delete chats
 - [x] Failed AI calls are undone, so no unanswered messages are left behind
+- [x] AI replies rendered as Markdown (lists, tables, code) with a Copy button
 
 ### Planned
 - [ ] Chat with PDF documents
@@ -123,7 +124,8 @@ docs/      learning-log.md and tech-decisions.md
 | 8 | Private chats per user and a "My chats" sidebar | ✅ |
 | 9 | Real AI replies behind an `AiService` interface | ✅ |
 | 10 | Rename and delete chats, safe handling of failed AI calls | ✅ |
-| 11 | Markdown rendering and a Copy button | 🔜 Next |
+| 11 | Safe Markdown rendering, Copy button, smarter scrolling | ✅ |
+| 12 | Streaming replies | 🔜 Next |
 
 ## Roadmap
 Chat polish and tests, then PDF upload and chat with PDF, summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.
