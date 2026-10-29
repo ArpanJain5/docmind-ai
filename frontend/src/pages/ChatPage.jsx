@@ -6,11 +6,16 @@ import {
   renameConversation,
   sendMessage,
 } from "../api/chatApi";
+import MessageBubble from "../components/MessageBubble";
 import { useAuth } from "../auth/AuthContext";
 import "../App.css";
 
 const STORAGE_KEY = "docmind.conversationId";
-const WELCOME = { role: "assistant", text: "Hi! I'm DocMind. Ask me anything." };
+const WELCOME = {
+  role: "assistant",
+  text: "Hi! I'm DocMind. Ask me anything.",
+  welcome: true,
+};
 
 function ChatPage() {
   const { user, logout } = useAuth();
@@ -26,6 +31,9 @@ function ChatPage() {
     return saved ? Number(saved) : null;
   });
   const bottomRef = useRef(null);
+  const messagesRef = useRef(null);
+  // True while the reader is at the bottom. Only then do we auto-scroll.
+  const stickToBottom = useRef(true);
 
   const busy = loading || opening;
 
@@ -62,10 +70,18 @@ function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on first load
   }, []);
 
-  // Scroll to the newest message whenever something changes
+  // Scroll to the newest message, but only if the reader is already at the bottom
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (stickToBottom.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, loading]);
+
+  function handleScroll() {
+    const el = messagesRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
 
   async function refreshConversations() {
     try {
@@ -85,6 +101,7 @@ function ChatPage() {
 
     const isNewChat = conversationId === null;
 
+    stickToBottom.current = true; // sending a message always jumps to the bottom
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setLoading(true);
@@ -127,6 +144,7 @@ function ChatPage() {
         await refreshConversations(); // it vanished: update the list
         return;
       }
+      stickToBottom.current = true;
       setConversationId(id);
       localStorage.setItem(STORAGE_KEY, String(id));
       setMessages(history.length > 0 ? history : [WELCOME]);
@@ -180,6 +198,7 @@ function ChatPage() {
 
   function handleNewChat() {
     if (busy) return;
+    stickToBottom.current = true;
     localStorage.removeItem(STORAGE_KEY);
     setConversationId(null);
     setMessages([WELCOME]);
@@ -266,14 +285,9 @@ function ChatPage() {
           </div>
         </div>
 
-        <div className="messages">
+        <div className="messages" ref={messagesRef} onScroll={handleScroll}>
           {messages.map((m, index) => (
-            <div
-              key={index}
-              className={`bubble ${m.role}${m.error ? " error" : ""}`}
-            >
-              {m.text}
-            </div>
+            <MessageBubble key={index} message={m} />
           ))}
           {loading && (
             <div className="bubble assistant typing">DocMind is typing...</div>
