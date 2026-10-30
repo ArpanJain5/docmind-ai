@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 @Service
 public class ChatService {
@@ -46,7 +47,37 @@ public class ChatService {
         this.aiService = aiService;
     }
 
+    // ---------- chatting ----------
+
+    // The whole reply at once
     public ChatResponse chat(Long userId, Long conversationId, String userMessage) {
+        return converse(userId, conversationId, userMessage,
+                id -> { },
+                history -> aiService.complete(SYSTEM_PROMPT, history));
+    }
+
+    // The reply piece by piece: onConversation gets the chat id first, then onToken gets each piece
+    public ChatResponse chatStreaming(Long userId, Long conversationId, String userMessage,
+                                      Consumer<Long> onConversation, Consumer<String> onToken) {
+        return converse(userId, conversationId, userMessage,
+                onConversation,
+                history -> aiService.stream(SYSTEM_PROMPT, history, onToken));
+    }
+
+    // Lets the controller return a real 404 BEFORE a stream starts
+    public void verifyAccess(Long userId, Long conversationId) {
+        if (conversationId != null) {
+            findOwnedConversation(userId, conversationId);
+        }
+    }
+
+    @FunctionalInterface
+    private interface AiCall {
+        String run(List<AiMessage> history);
+    }
+
+    private ChatResponse converse(Long userId, Long conversationId, String userMessage,
+                                  Consumer<Long> onConversation, AiCall aiCall) {
         boolean isNewChat = (conversationId == null);
 
         Conversation conversation = isNewChat
@@ -57,12 +88,13 @@ public class ChatService {
         Message savedUserMessage =
                 messageRepository.save(new Message(conversation, Role.USER, userMessage));
 
-        // The slow call. We deliberately do NOT keep a database transaction open during it.
+        // The slow part. We deliberately do NOT keep a database transaction open during it.
         String reply;
         try {
-            reply = askAi(conversation.getId());
-        } catch (ResponseStatusException e) {
-            // The AI failed: undo what we saved, so no half-finished exchange is left behind
+            onConversation.accept(conversation.getId());
+            reply = callAi(conversation.getId(), aiCall);
+        } catch (RuntimeException e) {
+            // The AI failed, or the browser stopped listening: undo what we saved
             messageRepository.deleteById(savedUserMessage.getId());
             if (isNewChat) {
                 conversationRepository.deleteById(conversation.getId());
@@ -74,6 +106,24 @@ public class ChatService {
 
         return new ChatResponse(conversation.getId(), reply);
     }
+
+    private String callAi(Long conversationId, AiCall aiCall) {
+        List<Message> all = messageRepository.findByConversationIdOrderByIdAsc(conversationId);
+        List<Message> recent = all.subList(Math.max(0, all.size() - MAX_HISTORY_MESSAGES), all.size());
+        List<AiMessage> history = recent.stream()
+                .map(m -> new AiMessage(m.getRole(), m.getContent()))
+                .toList();
+
+        try {
+            return aiCall.run(history);
+        } catch (AiException e) {
+            // 502 = "the service behind me failed". The details stay in our logs.
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_GATEWAY, "The AI service is unavailable", e);
+        }
+    }
+
+    // ---------- chats list, messages, rename, delete ----------
 
     public List<ConversationSummary> listConversations(Long userId) {
         return conversationRepository.findByUserIdOrderByIdDesc(userId)
@@ -105,21 +155,7 @@ public class ChatService {
         return ConversationSummary.from(conversation);
     }
 
-    private String askAi(Long conversationId) {
-        List<Message> all = messageRepository.findByConversationIdOrderByIdAsc(conversationId);
-        List<Message> recent = all.subList(Math.max(0, all.size() - MAX_HISTORY_MESSAGES), all.size());
-        List<AiMessage> history = recent.stream()
-                .map(m -> new AiMessage(m.getRole(), m.getContent()))
-                .toList();
-
-        try {
-            return aiService.complete(SYSTEM_PROMPT, history);
-        } catch (AiException e) {
-            // 502 = "the service behind me failed". The details stay in our logs.
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_GATEWAY, "The AI service is unavailable", e);
-        }
-    }
+    // ---------- helpers ----------
 
     // The one place that decides "is this chat yours?"
     private Conversation findOwnedConversation(Long userId, Long conversationId) {
