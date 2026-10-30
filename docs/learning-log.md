@@ -98,3 +98,12 @@
 - Added a Copy button that copies the original Markdown text, with a fallback for browsers that restrict the Clipboard API
 - Auto-scroll now only follows new messages when the reader is already at the bottom
 - Extracted a MessageBubble component to keep ChatPage readable
+
+## Day 12
+- Streamed AI replies end to end: Groq stream (data: lines until [DONE]) to Spring SseEmitter to a React fetch stream reader
+- Learned: SSE is one long HTTP response of named events, simpler than WebSockets for one-way data
+- Learned: EventSource cannot send an Authorization header, so React reads the stream with fetch
+- Learned: an HTTP status cannot change after streaming starts, so the ownership check runs before the stream and later failures become an error event
+- Added a Stop button: the server notices the disconnect and undoes the exchange
+- Tested the backend alone with curl.exe -N before building the UI
+- Refactored ChatService so chat() and chatStreaming() share one method with one undo rule

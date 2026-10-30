@@ -13,6 +13,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - [x] "My chats" sidebar: switch, rename, and delete chats
 - [x] Failed AI calls are undone, so no unanswered messages are left behind
 - [x] AI replies rendered as Markdown (lists, tables, code) with a Copy button
+- [x] Streaming AI replies with a Stop button
 
 ### Planned
 - [ ] Chat with PDF documents
@@ -52,6 +53,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 | `GET /api/conversations/{id}/messages` | token | Messages of one of my chats |
 | `PATCH /api/conversations/{id}` | token | Rename my chat |
 | `DELETE /api/conversations/{id}` | token | Delete my chat |
+| `POST /api/chat/stream` | token | Send a message, get the reply as a stream of events |
 
 ## Security highlights
 - Passwords hashed with BCrypt; never stored or logged
@@ -125,7 +127,8 @@ docs/      learning-log.md and tech-decisions.md
 | 9 | Real AI replies behind an `AiService` interface | ✅ |
 | 10 | Rename and delete chats, safe handling of failed AI calls | ✅ |
 | 11 | Safe Markdown rendering, Copy button, smarter scrolling | ✅ |
-| 12 | Streaming replies | 🔜 Next |
+| 12 | Streaming replies (Server-Sent Events) with a Stop button | ✅ |
+| 13 | Automated tests | 🔜 Next |
 
 ## Roadmap
 Chat polish and tests, then PDF upload and chat with PDF, summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.

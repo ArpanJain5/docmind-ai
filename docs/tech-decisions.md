@@ -86,6 +86,11 @@
 | 52 | Rendering AI replies | `react-markdown` + `remark-gfm` (no raw HTML) | ✅ |
 | 53 | Copy to clipboard | Clipboard API with a fallback | ✅ |
 | 54 | Chat auto-scroll | Follow new messages only when the reader is at the bottom | ✅ |
+| 55 | Streaming from server to browser | Server-Sent Events (`SseEmitter`) | ✅ |
+| 56 | Reading the stream in React | `fetch` + `ReadableStream` (not `EventSource`) | ✅ |
+| 57 | Threading for streams | Java 21 virtual threads | ✅ |
+| 58 | Stream protocol | Named events `meta`, `token`, `done`, `error` with JSON data | ✅ |
+| 59 | Stopped or failed streams | Undo the saved user message; save the reply only when complete | ✅ |
 
 ---
 
@@ -544,6 +549,43 @@
 - **Alternatives:** Always scroll, never scroll, a floating "jump to latest" button.
 - **Why not those:** The first two are annoying in opposite ways, and the button is a later enhancement (it will matter more with streaming).
 
+### 3.55 Streaming with Server-Sent Events ✅
+- **What:** `POST /api/chat/stream` keeps one HTTP response open and writes named events as the AI produces text.
+- **Why we chose it:** The data flows one way (server to browser), and SSE is plain HTTP, so it passes through normal infrastructure and needs no extra protocol or library.
+- **Alternatives:** WebSockets, long polling, polling, waiting for the whole reply.
+- **Why not those:**
+  - *WebSockets:* Two-way and more powerful, but heavier to run and secure, and we don't need the browser-to-server direction.
+  - *Polling / long polling:* More requests and more delay.
+  - *Whole reply:* Long waits feel broken, especially with a reasoning model that thinks first.
+- **Interview line:** "Streaming is one-way, so I used SSE instead of WebSockets."
+
+### 3.56 Reading SSE with fetch (not EventSource) ✅
+- **What:** React reads `response.body` with a stream reader, splits events on blank lines, and parses the `event:` and `data:` lines.
+- **Why we chose it:** The browser's `EventSource` only supports GET and cannot set an `Authorization` header, and our JWT travels in that header.
+- **Alternatives:** `EventSource` with the token in the URL, a cookie-based session, a library such as `@microsoft/fetch-event-source`.
+- **Why not those:** A token in a URL leaks into logs and browser history. Cookies would change our auth design. A small hand-written parser is enough and shows how SSE works.
+- **Cancellation:** An `AbortController` closes the connection (the Stop button).
+
+### 3.57 SseEmitter on virtual threads ✅
+- **What:** The controller returns an `SseEmitter` immediately and a virtual thread does the blocking AI call and writes events.
+- **Why we chose it:** Blocking code stays simple, and Java 21 virtual threads make one thread per stream cheap.
+- **Alternatives:** Spring WebFlux (`Flux`), `StreamingResponseBody`, a platform thread pool.
+- **Why not those:** WebFlux would mean rewriting our blocking stack. A fixed pool limits how many streams can run at once.
+- **Gotchas:** The background thread has no login information, so the user id is read from the token before the thread starts. The stream has a 120-second timeout.
+
+### 3.58 Stream protocol and failure semantics ✅
+- **What:** Events: `meta` (the chat id, first), `token` (a piece of text), `done`, `error`. Data is JSON, so newlines and quotes are safe.
+- **Why:** After the first byte, the HTTP status can't change, so the ownership check (a real 404) and the validation (400) happen before the stream opens, and later failures become `error` events.
+- **Saving rule:** The user message is saved first, the assistant message only when the stream completes. On an AI error, a Stop, or a disconnect, we delete the user message (and a newly created chat).
+- **Alternatives:** Save the partial answer, mark messages as `FAILED`, one big transaction.
+- **Why not those:** Partial answers confuse the history and the AI's memory. A status column adds complexity. A transaction would hold a database connection for the whole stream (see 3.30).
+- **Interview line:** "A stream is only committed when it finishes. Failure, Stop, and disconnect all roll back through one code path."
+
+### 3.59 Parsing the provider's stream ✅
+- **What:** We read `data:` lines until `data: [DONE]`, take `choices[0].delta.content`, and ignore chunks without content (reasoning models send their thinking in a separate field).
+- **Notes:** `stream: true` in the request body. JSON is parsed with Jackson 3 (`tools.jackson` packages).
+- **Trade-offs:** If the provider sends malformed data, we fail the reply rather than guess.
+
 ### 3.36 Known limitations: update ✅
 - **Replies show raw text.** Markdown from the AI (bold, lists, code) isn't rendered yet.
 - **No streaming.** The user waits for the full reply before seeing anything.
@@ -555,6 +597,10 @@
 - **Deleting a chat uses `window.confirm`** and cannot be undone.
 - Remove "Replies show raw text".
 - Add: no syntax highlighting in code blocks, Copy copies Markdown (not rich text), no per-code-block Copy button, and messages use their list index as the React key.
+- Add: the Markdown of the whole reply is re-parsed on every streamed piece (fine for these sizes, could be throttled later).
+- Add: a reply interrupted by Stop or a lost connection is discarded, not resumed.
+- Add: free-tier limits (8,000 tokens per minute) can interrupt long chats.
+- Add: no reconnect or retry logic for streams, and no per-user rate limit.
 
 ---
 
@@ -620,6 +666,18 @@ A: I treat model output as untrusted input. I render it with react-markdown, whi
 **Q: Why not render Markdown with dangerouslySetInnerHTML and a sanitizer?**
 A: It can work, but safety then depends on remembering to sanitize every time and on the sanitizer having no bypass. A renderer that never produces HTML removes that whole class of bug.
 
+**Q: How did you implement streaming responses?**
+A: The backend asks the AI provider for a stream and forwards each piece to the browser as a Server-Sent Event through an SseEmitter, on a virtual thread. React reads the stream with fetch and a stream reader, appends each piece to the message, and can cancel with an AbortController.
+
+**Q: Why SSE and not WebSockets?**
+A: The data only flows from server to browser, and SSE is plain HTTP, so it is simpler to run and secure. WebSockets would add a second protocol for a direction I don't need.
+
+**Q: Why didn't you use EventSource?**
+A: It can't send an Authorization header, and my JWT travels in one. Putting the token in the URL would leak it into logs, so I read the stream with fetch.
+
+**Q: What happens if the user presses Stop or the connection drops?**
+A: The server detects the failed write, deletes the saved user message (and a newly created chat), and nothing partial is stored. The UI removes the half answer and puts the text back in the box.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -656,6 +714,10 @@ A: It can work, but safety then depends on remembering to sanitize every time an
 | 11 | Rendered replies had large blank gaps between paragraphs and list items | The bubble uses `white-space: pre-wrap`, which also keeps the newlines between the HTML elements Markdown generates | Set `white-space: normal` on the `.markdown` wrapper |
 | 11 | The Copy button did nothing in VS Code's built-in browser | The Clipboard API is restricted in that embedded browser | Added a fallback in `copyText` and tested the real behavior in Chrome |
 | 11 | Console warning about an invalid `node` prop on `<a>` | Spread all props from react-markdown onto the DOM element | Passed only `href` and `children` in the custom link component |
+| 12 | `curl.exe` printed the whole stream only at the end | curl buffers its output by default | Added `-N` (no buffering) |
+| 12 | Red import for `JsonMapper` or other Jackson classes | Jackson 3 moved its packages from `com.fasterxml.jackson` to `tools.jackson` (only the annotations stayed) | Used the `tools.jackson.databind.json.JsonMapper` import |
+| 12 | `AccessDeniedException` in the backend log when a stream finished | Spring Security re-checks the request on the async dispatch that completes an SSE response | Allowed async dispatches in the security configuration (`DispatcherType.ASYNC`) |
+| 12 | After a failed first message, the next message returned "Not found" | The UI kept the id of a new chat that the server had already deleted in its undo | Reset the conversation id and the saved id in the `catch` block |
 
 ---
 
@@ -690,3 +752,4 @@ Copy this each time we add a tool:
 | 9 | Chose the free Groq provider; added AiService interface, RestClient, memory strategy, and failure/cost-control decisions |
 | 10 | Added delete, rename, and compensating-undo decisions; added Day 10 challenges; updated known limitations |
 | 11 | Added safe Markdown rendering, untrusted-output note, copy button, and auto-scroll decisions; updated known limitations |
+| 12 | Added streaming decisions (SSE, fetch reader, virtual threads, protocol, failure rules, provider stream parsing); updated known limitations |
