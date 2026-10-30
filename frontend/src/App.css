@@ -358,3 +358,14 @@
 .copy-btn:hover {
   opacity: 1;
 }
+
+/* Table cells should wrap at spaces, not in the middle of words */
+.markdown th,
+.markdown td {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.input-row .stop {
+  background: #dc2626;
+}

@@ -4,7 +4,7 @@ import {
   fetchConversations,
   fetchMessages,
   renameConversation,
-  sendMessage,
+  streamMessage,
 } from "../api/chatApi";
 import MessageBubble from "../components/MessageBubble";
 import { useAuth } from "../auth/AuthContext";
@@ -21,7 +21,8 @@ function ChatPage() {
   const { user, logout } = useAuth();
   const [messages, setMessages] = useState([WELCOME]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // a reply is on its way
+  const [receiving, setReceiving] = useState(false); // the first word has arrived
   const [opening, setOpening] = useState(false);
   const [conversations, setConversations] = useState([]);
   const [editingId, setEditingId] = useState(null);
@@ -32,6 +33,7 @@ function ChatPage() {
   });
   const bottomRef = useRef(null);
   const messagesRef = useRef(null);
+  const abortRef = useRef(null);
   // True while the reader is at the bottom. Only then do we auto-scroll.
   const stickToBottom = useRef(true);
 
@@ -70,10 +72,15 @@ function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on first load
   }, []);
 
+  // If this screen disappears (for example on logout), stop any reply in progress
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+
   // Scroll to the newest message, but only if the reader is already at the bottom
   useEffect(() => {
     if (stickToBottom.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      bottomRef.current?.scrollIntoView({ behavior: loading ? "auto" : "smooth" });
     }
   }, [messages, loading]);
 
@@ -100,38 +107,88 @@ function ChatPage() {
     if (!text || busy) return;
 
     const isNewChat = conversationId === null;
+    const baseLength = messages.length; // how many messages exist before this exchange
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let reply = "";
+    let started = false;
 
     stickToBottom.current = true; // sending a message always jumps to the bottom
     setMessages((prev) => [...prev, { role: "user", text }]);
     setInput("");
     setLoading(true);
+    setReceiving(false);
 
     try {
-      const result = await sendMessage(text, conversationId);
-      setConversationId(result.conversationId);
-      localStorage.setItem(STORAGE_KEY, String(result.conversationId));
-      setMessages((prev) => [...prev, { role: "assistant", text: result.reply }]);
+      await streamMessage(
+        text,
+        conversationId,
+        {
+          onMeta: (id) => {
+            setConversationId(id);
+            localStorage.setItem(STORAGE_KEY, String(id));
+          },
+          onToken: (piece) => {
+            reply += piece;
+            const current = reply;
+            if (!started) {
+              started = true;
+              setReceiving(true);
+              setMessages((prev) => [
+                ...prev,
+                { role: "assistant", text: current, streaming: true },
+              ]);
+            } else {
+              setMessages((prev) => [
+                ...prev.slice(0, -1),
+                { role: "assistant", text: current, streaming: true },
+              ]);
+            }
+          },
+        },
+        controller.signal
+      );
+
+      // Finished: swap the "streaming" bubble for the final one
+      setMessages((prev) => {
+        const finalMessage = { role: "assistant", text: reply.trim() };
+        return started ? [...prev.slice(0, -1), finalMessage] : [...prev, finalMessage];
+      });
       if (isNewChat) {
         refreshConversations(); // the new chat appears in the sidebar
       }
     } catch (error) {
-      // The server undoes a failed message, so we undo it on screen too
+      // The server undoes a failed or stopped exchange, so we undo it on screen too
       // and put the text back in the box, ready to send again.
+      const stopped = error.name === "AbortError";
       setMessages((prev) => [
-        ...prev.slice(0, -1),
+        ...prev.slice(0, baseLength),
         {
           role: "assistant",
-          text:
-            "Sorry, something went wrong: " +
-            error.message +
-            " Your message is back in the box. Press Send to try again.",
+          text: stopped
+            ? "Stopped. Your message is back in the box."
+            : "Sorry, something went wrong: " +
+              error.message +
+              " Your message is back in the box. Press Send to try again.",
           error: true,
         },
       ]);
       setInput(text);
+      if (isNewChat) {
+        // The server deleted the new chat, so forget its id
+        setConversationId(null);
+        localStorage.removeItem(STORAGE_KEY);
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
+      setReceiving(false);
     }
+  }
+
+  function handleStop() {
+    abortRef.current?.abort();
   }
 
   async function handleSelect(id) {
@@ -289,7 +346,7 @@ function ChatPage() {
           {messages.map((m, index) => (
             <MessageBubble key={index} message={m} />
           ))}
-          {loading && (
+          {loading && !receiving && (
             <div className="bubble assistant typing">DocMind is typing...</div>
           )}
           <div ref={bottomRef} />
@@ -303,9 +360,15 @@ function ChatPage() {
             onKeyDown={handleKeyDown}
             placeholder="Type a message... (Enter to send, Shift+Enter for a new line)"
           />
-          <button onClick={handleSend} disabled={busy || !input.trim()}>
-            Send
-          </button>
+          {loading ? (
+            <button className="stop" onClick={handleStop}>
+              Stop
+            </button>
+          ) : (
+            <button onClick={handleSend} disabled={busy || !input.trim()}>
+              Send
+            </button>
+          )}
         </div>
       </div>
     </div>

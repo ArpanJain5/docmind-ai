@@ -13,7 +13,7 @@ const markdownComponents = {
 };
 
 function MessageBubble({ message }) {
-  const { role, text, error, welcome } = message;
+  const { role, text, error, welcome, streaming } = message;
   const [copied, setCopied] = useState(false);
 
   // Show "Copied!" for a moment, then go back to "Copy"
@@ -30,7 +30,7 @@ function MessageBubble({ message }) {
   }
 
   const isAiReply = role === "assistant" && !error;
-  const canCopy = isAiReply && !welcome;
+  const canCopy = isAiReply && !welcome && !streaming;
 
   return (
     <div className={`bubble ${role}${error ? " error" : ""}`}>

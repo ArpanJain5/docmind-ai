@@ -83,3 +83,45 @@ export async function request(path, { method = "GET", body, skipAuth = false } =
 
   return response.json();
 }
+
+// Like request(), but returns the raw Response so the caller can read a stream
+export async function requestStream(path, { body, signal } = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+  };
+
+  const token = getToken();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw error; // the user pressed Stop
+    }
+    throw new ApiError(0, "Cannot reach the server. Is the backend running?");
+  }
+
+  if (response.status === 401 && token && onUnauthorized) {
+    onUnauthorized();
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, defaultMessage(response.status));
+  }
+
+  if (!response.body) {
+    throw new ApiError(0, "Your browser cannot read streamed replies.");
+  }
+
+  return response;
+}
