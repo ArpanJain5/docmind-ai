@@ -103,6 +103,16 @@ npm run dev
 
 Open http://localhost:5173, create an account, and start chatting.
 
+## Tests
+
+```powershell
+cd backend
+.\mvnw test        # 9 unit tests, 10 real-HTTP integration tests (in-memory database, fake AI)
+
+cd ..\frontend
+npm test           # 19 Vitest tests (request helper and stream reader)
+```
+
 ## Project structure
 
 ```
@@ -128,7 +138,8 @@ docs/      learning-log.md and tech-decisions.md
 | 10 | Rename and delete chats, safe handling of failed AI calls | ✅ |
 | 11 | Safe Markdown rendering, Copy button, smarter scrolling | ✅ |
 | 12 | Streaming replies (Server-Sent Events) with a Stop button | ✅ |
-| 13 | Automated tests | 🔜 Next |
+| 13 | Automated tests (unit, real-HTTP integration, frontend) | ✅ |
+| 14 | UI polish and routing | 🔜 Next |
 
 ## Roadmap
 Chat polish and tests, then PDF upload and chat with PDF, summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.

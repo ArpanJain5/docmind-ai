@@ -107,3 +107,12 @@
 - Added a Stop button: the server notices the disconnect and undoes the exchange
 - Tested the backend alone with curl.exe -N before building the UI
 - Refactored ChatService so chat() and chatStreaming() share one method with one undo rule
+
+## Day 13
+- Wrote 9 unit tests for ChatService with Mockito: ownership, the 20-message history cap, the undo rule on AI failure, streaming, and a browser that leaves mid-stream
+- Wrote 10 integration tests that start the whole app on a random port with H2 and the fake AI and call it over real HTTP
+- Learned: MockMvc skips the error dispatch to /error, so it would not have caught my Day 5 "everything is 403" bug; real HTTP does
+- Wrote 19 Vitest tests for the request() helper and the SSE stream reader
+- Broke the app on purpose (removed the ownership check, locked /error, broke the 401 rule) and watched the right tests fail
+- Learned: flipping the last character of a base64 JWT signature may not change its bytes, so tamper with the first character
+- Kept real secrets out of the test profile and used the fake AI so tests are free and offline

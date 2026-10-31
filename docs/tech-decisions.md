@@ -42,7 +42,7 @@
 | 5 | Build tool | Maven | ✅ |
 | 6 | Boilerplate reduction | Lombok | ✅ |
 | 7 | Dev productivity | Spring Boot DevTools | ✅ |
-| 8 | Database | MySQL | ✅ (Week 2) |
+| 8 | Database | MySQL | ✅ |
 | 9 | Data access | Spring Data JPA (Hibernate) | ✅ |
 | 10 | Authentication | Spring Security + JWT | ✅ |
 | 11 | Frontend library | React | ✅ (Day 2) |
@@ -91,6 +91,11 @@
 | 57 | Threading for streams | Java 21 virtual threads | ✅ |
 | 58 | Stream protocol | Named events `meta`, `token`, `done`, `error` with JSON data | ✅ |
 | 59 | Stopped or failed streams | Undo the saved user message; save the reply only when complete | ✅ |
+| 60 | Test strategy | Unit tests with mocks, real-HTTP integration tests, and frontend unit tests | ✅ |
+| 61 | Test database | H2 in-memory (MySQL mode) with a `test` profile | ✅ |
+| 62 | Backend test tools | JUnit, Mockito, AssertJ, JDK `HttpClient` (no extra libraries) | ✅ |
+| 63 | Frontend test runner | Vitest | ✅ |
+| 64 | AI in tests | `app.ai.provider=fake` | ✅ |
 
 ---
 
@@ -176,7 +181,7 @@
 - **Why not those:** JDBC means a lot of repetitive code. MyBatis and jOOQ give finer SQL control, but JPA is more common and quicker to start with.
 - **Related:** We'll use Flyway or Liquibase later if we want versioned schema changes. Otherwise `ddl-auto=update` is acceptable for development only.
 
-### 3.11 Spring Security + JWT 🔜
+### 3.11 Spring Security + JWT ✅
 - **What:** Login and protection of endpoints. After login, the server gives a signed token (JWT). The browser sends it with each request.
 - **Why we chose it:** JWT is stateless, so the server doesn't need to store sessions. It works well with a separate React frontend. Passwords will be hashed with BCrypt, never stored in plain text.
 - **Alternatives:** Server sessions with cookies, OAuth2 / "Login with Google", Auth0 / Firebase Auth, Keycloak.
@@ -186,7 +191,7 @@
   - *Keycloak/Auth0:* Overkill for a learning project, but worth knowing for enterprise.
 - **Known trade-off:** JWTs can't be revoked easily before they expire. We keep expiry short and can add refresh tokens.
 
-### 3.12 React 🔜
+### 3.12 React ✅
 - **What:** JavaScript library for building the user interface from components.
 - **Why we chose it:** Largest ecosystem and job market. Component structure suits a chat UI, upload forms, and history lists.
 - **Alternatives:** Angular, Vue, Svelte, server-rendered pages (Thymeleaf).
@@ -195,7 +200,7 @@
   - *Vue / Svelte:* Excellent and simpler, but smaller job market.
   - *Thymeleaf:* Keeps everything in Java, but less interactive, and a separate frontend teaches how real apps are structured.
 
-### 3.13 Vite 🔜
+### 3.13 Vite ✅
 - **What:** Tool that creates and runs the React project.
 - **Why we chose it:** Very fast startup and instant updates. It is the current recommended way to start React projects.
 - **Alternatives:** Create React App (CRA), Next.js, Parcel.
@@ -213,7 +218,7 @@
   - *Which hosted provider:* To be finalized. We'll hide the provider behind an `AiService` interface so we can swap providers without changing controllers.
 - **Spam detector note:** A traditional ML classifier (Naive Bayes, etc.) is cheaper at scale, but an LLM needs no training data, so it's the faster option for this project. We note the trade-off in interviews.
 - **Security rule:** The API key lives in an environment variable and is never committed. The browser never sees it, because only the backend calls the AI.
-- **Decision (Day 9):** We started with the Grok API. It has a single HTTPS endpoint, simple authentication (an API key header), clear documentation, and models with large context windows, which should help with PDF chat later. I have not benchmarked providers against each other yet. Because the provider sits behind `AiService`, comparing OpenAI, Gemini, or a local model means writing one new class, and the result of that comparison will be recorded here.
+- **Decision (Day 9):** Change to Groq (or delete that older bullet, since the next one already says Groq). It has a single HTTPS endpoint, simple authentication (an API key header), clear documentation, and models with large context windows, which should help with PDF chat later. I have not benchmarked providers against each other yet. Because the provider sits behind `AiService`, comparing OpenAI, Gemini, or a local model means writing one new class, and the result of that comparison will be recorded here.
 - **Dev tip:** Use the small, cheap model tier for development, and the fake provider for work that doesn't need real AI.
 - **Decision (Day 9):** We use the groq API on its free tier with the open-weight model `openai/gpt-oss-120b`, because I have no budget for a paid API. Groq exposes an OpenAI-compatible `/chat/completions` endpoint. As of October 2026 its published free limits for this model are 30 requests/min, 1,000 requests/day, 8,000 tokens/min, and 200,000 tokens/day (these change, so re-check).
 - **Why not a paid provider (Anthropic, OpenAI):** Cost. Because of the `AiService` interface, switching later means writing one class or changing a base URL.
@@ -398,12 +403,18 @@
 - **Reminder:** This is the "CORS must also be enabled in Spring Security" note from 3.20, now in practice. Without `.cors(...)`, the browser's preflight request is blocked.
 - **Gotcha:** `/error` must be permitted. Spring Boot forwards every error response (400, 409, 404) to `/error`. If Security locks it, all errors are replaced by a generic 403 and the real cause is hidden.
 
-### 3.36 Known limitations (updated) ✅
-- **Chat endpoints are still open** on the backend. The login gate exists only in the React UI, so anyone can call `/api/chat` and `/api/conversations/**` directly. Fix: tie conversations to users and require a token (Day 8).
+### 3.36 Known limitations (current) ✅
 - **Token in localStorage** is readable by injected scripts (see 3.40).
 - **No refresh tokens:** users must log in again after 60 minutes.
+- **No rate limiting** on register, login, or the AI endpoint, and no email verification.
 - **If the backend is down on page load,** the user sees the login screen even with a saved token.
-- **No email verification and no rate limiting** on register or login.
+- **Free-tier AI limits:** an HTTP 429 from the provider can interrupt long chats.
+- **Deleting a chat** uses `window.confirm` and cannot be undone.
+- **Streaming:** the Markdown of the whole reply is re-parsed for every piece (fine at these sizes). An interrupted reply is discarded, not resumed, and there are no reconnects.
+- **No syntax highlighting** in code blocks, and Copy copies Markdown, not rich text.
+- **No React component or browser end-to-end tests yet** (the screens are tested by hand).
+- **No continuous integration:** tests run only on my computer for now.
+- **The integration tests use H2, not MySQL,** and the real Groq call is never tested automatically (it needs a key and costs quota).
 
 ### 3.37 JWT with Spring's built-in resource server ✅
 - **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
@@ -422,7 +433,8 @@
 - **Alternatives:** Long-lived tokens (days or weeks), refresh tokens, a server-side token blacklist.
 - **Why not those (yet):** Long-lived tokens are risky. Refresh tokens add flow complexity and are a planned improvement. A blacklist brings back server-side state, which is what JWTs avoid.
 - **Known limit:** Users get logged out after an hour until refresh tokens exist.
-- **Open question:** Where should React store the token? `localStorage` is simple, but any injected script can read it. An httpOnly cookie is safer against that, but needs CSRF thought. Decision on Day 7.
+- **Open question:** Where should React store the token? `localStorage` is simple, but any injected script can read it. An httpOnly cookie is safer against that, but needs CSRF thought. 
+**Decision (Day 7):** localStorage for now. See 3.40 for the trade-offs and the planned upgrade.
 
 ### 3.39 Login error handling ✅
 - **What:** Wrong password and unknown email both return the same 401 "Invalid email or password".
@@ -586,21 +598,44 @@
 - **Notes:** `stream: true` in the request body. JSON is parsed with Jackson 3 (`tools.jackson` packages).
 - **Trade-offs:** If the provider sends malformed data, we fail the reply rather than guess.
 
-### 3.36 Known limitations: update ✅
-- **Replies show raw text.** Markdown from the AI (bold, lists, code) isn't rendered yet.
-- **No streaming.** The user waits for the full reply before seeing anything.
-- **Token in localStorage** is readable by injected scripts (see 3.40).
-- **No refresh tokens:** users must log in again after 60 minutes.
-- **No rate limiting** on register, login, or the AI endpoint, and no email verification.
-- **If the backend is down on page load,** the user sees the login screen even with a saved token.
-- **Free-tier AI limits:** an HTTP 429 from the provider can interrupt long chats.
-- **Deleting a chat uses `window.confirm`** and cannot be undone.
-- Remove "Replies show raw text".
-- Add: no syntax highlighting in code blocks, Copy copies Markdown (not rich text), no per-code-block Copy button, and messages use their list index as the React key.
-- Add: the Markdown of the whole reply is re-parsed on every streamed piece (fine for these sizes, could be throttled later).
-- Add: a reply interrupted by Stop or a lost connection is discarded, not resumed.
-- Add: free-tier limits (8,000 tokens per minute) can interrupt long chats.
-- Add: no reconnect or retry logic for streams, and no per-user rate limit.
+### 3.60 Test strategy: unit, integration, and frontend tests ✅
+- **What:** Fast unit tests for business rules, fewer slower integration tests for the whole app, and unit tests for the frontend's logic.
+- **Why we chose it:** Each level catches different mistakes. Unit tests point to the exact rule that broke. Integration tests prove the pieces work together (security filters, JSON, database, streaming).
+- **Alternatives:** Manual testing only, only end-to-end browser tests, only unit tests.
+- **Why not those:** Manual testing does not scale and misses regressions. Only end-to-end tests are slow and hard to debug. Only unit tests miss wiring bugs such as the Day 5 `/error` problem.
+- **Rule:** I do not trust a test until I have seen it fail for the right reason (see 3.69).
+
+### 3.61 H2 in-memory database for tests ✅
+- **What:** Tests run with the `test` profile: H2 in MySQL mode, tables created fresh, the fake AI, and a test-only JWT secret.
+- **Why we chose it:** It needs nothing installed, runs on any computer, and never touches the development MySQL.
+- **Alternatives:** The development MySQL, Testcontainers with a real MySQL, mocking the repositories everywhere.
+- **Why not those:** The development database makes tests depend on my machine and my data. Mocking repositories everywhere would never test the real SQL and constraints. Testcontainers is the most realistic option but needs Docker.
+- **Trade-off:** H2 is not MySQL, so rare SQL differences can hide. Planned: Testcontainers MySQL when we add CI.
+
+### 3.62 Integration tests over real HTTP, not MockMvc ✅
+- **What:** `ApiIntegrationTest` starts the whole application on a random port and calls it with the JDK `HttpClient`.
+- **Why we chose it:** It runs the real servlet container, the full security filter chain, JSON conversion, and the real SSE stream. `MockMvc` does not perform the error dispatch to `/error`, so it would have passed even with the Day 5 bug.
+- **Alternatives:** `MockMvc`, `@WebMvcTest` slices, `TestRestTemplate`.
+- **Why not those:** They are faster but skip parts of the real request path, and some of their package names changed in Spring Boot 4, so the plain JDK client is simpler and stable.
+- **Trade-off:** Slower (seconds) and uses a port. Every test uses a fresh random email so tests never interfere with each other.
+- **Interview line:** "I test security rules over real HTTP, because the bugs I actually had lived in the framework wiring, not in my own code."
+
+### 3.63 Unit tests mock only the edges ✅
+- **What:** `ChatServiceTest` replaces the repositories and the AI with Mockito fakes and tests our rules: ownership, history cap, undo on failure, streaming, and a disconnected browser.
+- **Why we chose it:** Our rules live in the service. Fakes make the tests instant and let us force situations that are hard to create for real, such as the AI failing midway.
+- **Alternatives:** Test through the database only, use a spy on the real AI.
+- **Trade-off:** Mocks can drift from reality, which is why the integration tests exist too. Strictness is set to lenient so shared setup stubs don't fail unrelated tests.
+
+### 3.64 Vitest for the frontend ✅
+- **What:** Vitest tests the `request()` helper (token header, 401 logout, friendly messages, 204) and the stream reader (events split across network chunks, error events, a stream that ends early).
+- **Why we chose it:** It is built by the Vite team, reuses our Vite setup, and starts instantly.
+- **Alternatives:** Jest, React Testing Library for components, Playwright for browser end-to-end tests.
+- **Why not those (yet):** Jest needs extra configuration for Vite projects. Component and end-to-end tests are valuable later, but the riskiest frontend logic is in plain functions.
+
+### 3.65 Tests must be seen failing ✅
+- **What:** After writing tests I deliberately broke the code (removed the owner check, locked `/error`, disabled the 401 logout rule) and confirmed the matching tests failed.
+- **Why:** A test that cannot fail gives false confidence.
+- **Interview line:** "I verify my tests by introducing the bug they are supposed to catch."
 
 ---
 
@@ -678,6 +713,15 @@ A: It can't send an Authorization header, and my JWT travels in one. Putting the
 **Q: What happens if the user presses Stop or the connection drops?**
 A: The server detects the failed write, deletes the saved user message (and a newly created chat), and nothing partial is stored. The UI removes the half answer and puts the text back in the box.
 
+**Q: How do you test your backend?**
+A: Unit tests with Mockito for the business rules, such as ownership, the history cap, and undoing a message when the AI fails. Then integration tests that start the whole app on a random port with an in-memory database and a fake AI, and call it over real HTTP. The fake AI keeps tests free and offline.
+
+**Q: Why real HTTP instead of MockMvc?**
+A: MockMvc skips the error dispatch, so a bug where Spring Security blocked the /error path and turned every error into a 403 would have passed. Real HTTP tests exercise the whole filter chain.
+
+**Q: How do you know your tests are any good?**
+A: I break the code on purpose. When I removed the owner check from the conversation lookup, the cross-user test failed, and when I locked the error path, the validation tests failed with 403.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -718,6 +762,10 @@ A: The server detects the failed write, deletes the saved user message (and a ne
 | 12 | Red import for `JsonMapper` or other Jackson classes | Jackson 3 moved its packages from `com.fasterxml.jackson` to `tools.jackson` (only the annotations stayed) | Used the `tools.jackson.databind.json.JsonMapper` import |
 | 12 | `AccessDeniedException` in the backend log when a stream finished | Spring Security re-checks the request on the async dispatch that completes an SSE response | Allowed async dispatches in the security configuration (`DispatcherType.ASYNC`) |
 | 12 | After a failed first message, the next message returned "Not found" | The UI kept the id of a new chat that the server had already deleted in its undo | Reset the conversation id and the saved id in the `catch` block |
+| 12 | Sent a zip of the project that contained `application-local.properties` (real API key, JWT secret, DB password) | Zipped the whole folder instead of only the committed files | Revoked the key, generated a new JWT secret, and now share with `git archive` (tracked files only) |
+| 13 | Tests failed with `Access denied` or could not reach MySQL | A test class started the app with the development settings because `@ActiveProfiles("test")` was missing, or `application-test.properties` was not in `src/test/resources` | Added `@ActiveProfiles("test")` and put the file in the right folder |
+| 13 | `Could not resolve com.h2database:h2` | The Maven project had not synchronized after editing `pom.xml` | Clicked synchronize or ran `.\mvnw clean test` |
+| 13 | Frontend tests failed with `localStorage is not defined` | Vitest runs in Node, which has no browser storage | Added a small `stubStorage()` helper that fakes `localStorage` |
 
 ---
 
@@ -753,3 +801,4 @@ Copy this each time we add a tool:
 | 10 | Added delete, rename, and compensating-undo decisions; added Day 10 challenges; updated known limitations |
 | 11 | Added safe Markdown rendering, untrusted-output note, copy button, and auto-scroll decisions; updated known limitations |
 | 12 | Added streaming decisions (SSE, fetch reader, virtual threads, protocol, failure rules, provider stream parsing); updated known limitations |
+| 13 | Added test strategy, H2 test database, real-HTTP integration tests, mocking, Vitest, and the "tests must fail first" decisions; fixed leftover doc errors from the Day 12 review |
