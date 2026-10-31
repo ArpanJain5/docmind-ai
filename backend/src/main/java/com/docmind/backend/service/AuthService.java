@@ -28,7 +28,7 @@ public class AuthService {
     }
 
     public UserResponse register(RegisterRequest request) {
-        
+
         String email = request.email().strip().toLowerCase(Locale.ROOT);
 
         if (userRepository.existsByEmail(email)) {
@@ -51,7 +51,7 @@ public class AuthService {
         return new ResponseStatusException(HttpStatus.CONFLICT, "Email is already registered");
     }
 
-        public AuthResponse login(LoginRequest request) {
+    public AuthResponse login(LoginRequest request) {
         String email = request.email().strip().toLowerCase(Locale.ROOT);
 
         User user = userRepository.findByEmail(email).orElse(null);

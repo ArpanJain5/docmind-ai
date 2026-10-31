@@ -23,17 +23,18 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // Use the CORS rules from WebConfig (without this, the browser blocks React again)
+                // Use the CORS rules from WebConfig (without this, the browser blocks React
+                // again)
                 .cors(Customizer.withDefaults())
                 // Safe to turn off: we use tokens in headers, not cookies
                 .csrf(csrf -> csrf.disable())
-                .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                                .authorizeHttpRequests(auth -> auth
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .authorizeHttpRequests(auth -> auth
                         // Only these doors are open to strangers
                         .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login").permitAll()
                         .requestMatchers("/api/hello").permitAll()
-                        // Spring forwards errors (400/409/etc.) to /error; if it is blocked, they all turn into 403
+                        // Spring forwards errors (400/409/etc.) to /error; if it is blocked, they all
+                        // turn into 403
                         .requestMatchers("/error").permitAll()
                         // Everything else (chat, conversations, /me) needs a valid token
                         .anyRequest().authenticated())
