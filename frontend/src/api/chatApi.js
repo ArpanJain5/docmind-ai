@@ -10,7 +10,7 @@ export function sendMessage(message, conversationId) {
 }
 
 // One server event looks like:  "event:token\ndata:{...}"
-function parseEvent(raw) {
+export function parseEvent(raw) {
   let name = "message";
   const dataLines = [];
 
