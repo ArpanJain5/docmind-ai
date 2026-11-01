@@ -14,6 +14,8 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   // If a token is saved, we must ask the server who it belongs to before showing anything
   const [checking, setChecking] = useState(() => Boolean(getToken()));
+  // True when we could not even ask the server who we are (it is down or unreachable)
+  const [serverDown, setServerDown] = useState(false);
 
   const logout = useCallback(() => {
     clearToken();
@@ -28,28 +30,42 @@ export function AuthProvider({ children }) {
     return () => setUnauthorizedHandler(null);
   }, [logout]);
 
+  // Asks the server "who am I?" for the saved token
+  const checkSession = useCallback((isCancelled = () => false) => {
+    return authApi
+      .fetchMe()
+      .then((me) => {
+        if (!isCancelled()) setUser(me);
+      })
+      .catch((error) => {
+        // A 401 already logged us out inside request().
+        // If the server itself is unreachable or broken, say so instead of showing the login page.
+        if (!isCancelled() && (error.status === 0 || error.status >= 500)) {
+          setServerDown(true);
+        }
+      })
+      .finally(() => {
+        if (!isCancelled()) setChecking(false);
+      });
+  }, []);
+
   // On page load: if we have a saved token, ask "who am I?"
   useEffect(() => {
     if (!getToken()) return;
 
     let cancelled = false;
-    authApi
-      .fetchMe()
-      .then((me) => {
-        if (!cancelled) setUser(me);
-      })
-      .catch(() => {
-        // A 401 already logged us out inside request(). Other errors
-        // (like the backend being down) leave the saved token alone.
-      })
-      .finally(() => {
-        if (!cancelled) setChecking(false);
-      });
+    checkSession(() => cancelled);
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [checkSession]);
+
+  function retrySession() {
+    setServerDown(false);
+    setChecking(true);
+    checkSession();
+  }
 
   const login = useCallback(async (email, password) => {
     const result = await authApi.login(email, password);
@@ -66,8 +82,10 @@ export function AuthProvider({ children }) {
   );
 
   const value = useMemo(
-    () => ({ user, checking, login, register, logout }),
-    [user, checking, login, register, logout]
+    () => ({ user, checking, serverDown, login, register, logout, retrySession }),
+    // retrySession only uses stable functions, so it is safe to leave out of the list
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user, checking, serverDown, login, register, logout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

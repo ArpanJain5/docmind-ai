@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import { useAuth } from "../auth/AuthContext";
+import { usePageTitle } from "../hooks/usePageTitle";
 import "./AuthPage.css";
 
-function AuthPage() {
+// mode is "login" or "register" and comes from the URL (/login or /register)
+function AuthPage({ mode }) {
   const { login, register } = useAuth();
-  const [mode, setMode] = useState("login");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -12,11 +14,7 @@ function AuthPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const isRegister = mode === "register";
-
-  function switchMode() {
-    setMode(isRegister ? "login" : "register");
-    setError("");
-  }
+  usePageTitle(isRegister ? "Create account" : "Log in");
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -30,7 +28,7 @@ function AuthPage() {
       } else {
         await login(email.trim(), password);
       }
-      // On success the app switches to the chat screen by itself
+      // On success the router sends the user on to the chat by itself
     } catch (err) {
       setError(err.message);
       setSubmitting(false);
@@ -84,7 +82,11 @@ function AuthPage() {
           />
         </label>
 
-        {error && <div className="error-box">{error}</div>}
+        {error && (
+          <div className="error-box" role="alert">
+            {error}
+          </div>
+        )}
 
         <button className="submit" type="submit" disabled={submitting}>
           {submitting ? "Please wait..." : isRegister ? "Create account" : "Log in"}
@@ -93,9 +95,9 @@ function AuthPage() {
 
       <p className="switch">
         {isRegister ? "Already have an account? " : "New here? "}
-        <button type="button" className="link-button" onClick={switchMode}>
+        <Link className="link-button" to={isRegister ? "/login" : "/register"}>
           {isRegister ? "Log in" : "Create an account"}
-        </button>
+        </Link>
       </p>
     </div>
   );

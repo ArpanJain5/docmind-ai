@@ -8,6 +8,7 @@ import {
 } from "../api/chatApi";
 import MessageBubble from "../components/MessageBubble";
 import { useAuth } from "../auth/AuthContext";
+import { usePageTitle } from "../hooks/usePageTitle";
 import "../App.css";
 
 const STORAGE_KEY = "docmind.conversationId";
@@ -16,8 +17,15 @@ const WELCOME = {
   text: "Hi! I'm DocMind. Ask me anything.",
   welcome: true,
 };
+const SUGGESTIONS = [
+  "Explain how JWT authentication works",
+  "Write a polite email asking for a deadline extension",
+  "Give me 3 tips to prepare for a Java interview",
+];
 
 function ChatPage() {
+  usePageTitle("Chat");
+
   const { user, logout } = useAuth();
   const [messages, setMessages] = useState([WELCOME]);
   const [input, setInput] = useState("");
@@ -25,6 +33,8 @@ function ChatPage() {
   const [receiving, setReceiving] = useState(false); // the first word has arrived
   const [opening, setOpening] = useState(false);
   const [conversations, setConversations] = useState([]);
+  const [chatsStatus, setChatsStatus] = useState("loading"); // loading, ready, or error
+  const [sidebarOpen, setSidebarOpen] = useState(false); // the phone-sized drawer
   const [editingId, setEditingId] = useState(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [conversationId, setConversationId] = useState(() => {
@@ -33,19 +43,22 @@ function ChatPage() {
   });
   const bottomRef = useRef(null);
   const messagesRef = useRef(null);
+  const textareaRef = useRef(null);
   const abortRef = useRef(null);
   // True while the reader is at the bottom. Only then do we auto-scroll.
   const stickToBottom = useRef(true);
 
   const busy = loading || opening;
+  const isEmptyChat = messages.length === 1 && messages[0].welcome;
 
   // First load: the sidebar list, and the chat that was open last time
   useEffect(() => {
     fetchConversations()
-      .then(setConversations)
-      .catch(() => {
-        // The sidebar is a convenience. If it fails, the chat still works.
-      });
+      .then((list) => {
+        setConversations(list);
+        setChatsStatus("ready");
+      })
+      .catch(() => setChatsStatus("error"));
 
     if (!conversationId) return;
 
@@ -77,6 +90,17 @@ function ChatPage() {
     return () => abortRef.current?.abort();
   }, []);
 
+  // On a phone the Escape key closes the chat list drawer
+  useEffect(() => {
+    if (!sidebarOpen) return;
+
+    function onKeyDown(event) {
+      if (event.key === "Escape") setSidebarOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sidebarOpen]);
+
   // Scroll to the newest message, but only if the reader is already at the bottom
   useEffect(() => {
     if (stickToBottom.current) {
@@ -90,12 +114,25 @@ function ChatPage() {
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
+  // Quietly updates the sidebar after a change (if it fails, the old list stays)
   async function refreshConversations() {
     try {
       setConversations(await fetchConversations());
+      setChatsStatus("ready");
     } catch {
-      // ignore: see the comment above
+      // ignore
     }
+  }
+
+  // The "Try again" button when the chat list could not be loaded
+  function reloadChats() {
+    setChatsStatus("loading");
+    fetchConversations()
+      .then((list) => {
+        setConversations(list);
+        setChatsStatus("ready");
+      })
+      .catch(() => setChatsStatus("error"));
   }
 
   function showError(text) {
@@ -191,6 +228,12 @@ function ChatPage() {
     abortRef.current?.abort();
   }
 
+  // Do not name this "useSomething": React reads names starting with "use" as hooks
+  function fillSuggestion(text) {
+    setInput(text);
+    textareaRef.current?.focus();
+  }
+
   async function handleSelect(id) {
     if (busy || id === conversationId) return;
 
@@ -205,6 +248,7 @@ function ChatPage() {
       setConversationId(id);
       localStorage.setItem(STORAGE_KEY, String(id));
       setMessages(history.length > 0 ? history : [WELCOME]);
+      setSidebarOpen(false);
     } catch (error) {
       showError("Could not open that chat: " + error.message);
     } finally {
@@ -259,6 +303,7 @@ function ChatPage() {
     localStorage.removeItem(STORAGE_KEY);
     setConversationId(null);
     setMessages([WELCOME]);
+    setSidebarOpen(false);
   }
 
   function handleKeyDown(event) {
@@ -270,66 +315,105 @@ function ChatPage() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
+      <aside
+        id="chat-sidebar"
+        className={`sidebar${sidebarOpen ? " open" : ""}`}
+        aria-label="Your chats"
+      >
         <h2>My chats</h2>
-        {conversations.length === 0 && (
+
+        {chatsStatus === "loading" && (
+          <ul aria-hidden="true">
+            <li className="skeleton" />
+            <li className="skeleton" />
+            <li className="skeleton" />
+          </ul>
+        )}
+
+        {chatsStatus === "error" && (
+          <div className="sidebar-error" role="alert">
+            <p>Could not load your chats.</p>
+            <button className="link-button" onClick={reloadChats}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {chatsStatus === "ready" && conversations.length === 0 && (
           <p className="empty">No chats yet. Say hello!</p>
         )}
-        <ul>
-          {conversations.map((c) => (
-            <li key={c.id} className="chat-row">
-              {editingId === c.id ? (
-                <input
-                  className="rename-input"
-                  value={editingTitle}
-                  onChange={(e) => setEditingTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveRename(c);
-                    if (e.key === "Escape") cancelRename();
-                  }}
-                  onBlur={cancelRename}
-                  onFocus={(e) => e.target.select()}
-                  maxLength={120}
-                  aria-label="Chat name"
-                  autoFocus
-                />
-              ) : (
-                <>
-                  <button
-                    className={`chat-item${c.id === conversationId ? " active" : ""}`}
-                    onClick={() => handleSelect(c.id)}
-                    disabled={busy}
-                    title={c.title}
-                  >
-                    {c.title}
-                  </button>
-                  <button
-                    className="icon-btn"
-                    onClick={() => startRename(c)}
-                    disabled={busy}
-                    title="Rename"
-                    aria-label={`Rename ${c.title}`}
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    className="icon-btn"
-                    onClick={() => handleDelete(c)}
-                    disabled={busy}
-                    title="Delete"
-                    aria-label={`Delete ${c.title}`}
-                  >
-                    🗑️
-                  </button>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
+
+        {chatsStatus === "ready" && (
+          <ul>
+            {conversations.map((c) => (
+              <li key={c.id} className="chat-row">
+                {editingId === c.id ? (
+                  <input
+                    className="rename-input"
+                    value={editingTitle}
+                    onChange={(e) => setEditingTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveRename(c);
+                      if (e.key === "Escape") {
+                        e.stopPropagation(); // cancel the rename only, not the drawer
+                        cancelRename();
+                      }
+                    }}
+                    onBlur={cancelRename}
+                    onFocus={(e) => e.target.select()}
+                    maxLength={120}
+                    aria-label="Chat name"
+                    autoFocus
+                  />
+                ) : (
+                  <>
+                    <button
+                      className={`chat-item${c.id === conversationId ? " active" : ""}`}
+                      onClick={() => handleSelect(c.id)}
+                      disabled={busy}
+                      title={c.title}
+                    >
+                      {c.title}
+                    </button>
+                    <button
+                      className="icon-btn"
+                      onClick={() => startRename(c)}
+                      disabled={busy}
+                      title="Rename"
+                      aria-label={`Rename ${c.title}`}
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      className="icon-btn"
+                      onClick={() => handleDelete(c)}
+                      disabled={busy}
+                      title="Delete"
+                      aria-label={`Delete ${c.title}`}
+                    >
+                      🗑️
+                    </button>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
       </aside>
+
+      {sidebarOpen && <div className="backdrop" onClick={() => setSidebarOpen(false)} />}
 
       <div className="app">
         <div className="header">
+          <button
+            className="menu-btn"
+            onClick={() => setSidebarOpen((open) => !open)}
+            aria-label="Show or hide my chats"
+            aria-expanded={sidebarOpen}
+            aria-controls="chat-sidebar"
+          >
+            ☰
+          </button>
           <h1>DocMind AI 🧠</h1>
           <div className="header-actions">
             <span className="user-name">{user.displayName}</span>
@@ -342,10 +426,33 @@ function ChatPage() {
           </div>
         </div>
 
-        <div className="messages" ref={messagesRef} onScroll={handleScroll}>
+        <div
+          className="messages"
+          ref={messagesRef}
+          onScroll={handleScroll}
+          role="log"
+          aria-live="polite"
+          aria-busy={loading}
+        >
           {messages.map((m, index) => (
             <MessageBubble key={index} message={m} />
           ))}
+
+          {isEmptyChat && !busy && (
+            <div className="suggestions">
+              {SUGGESTIONS.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  className="chip"
+                  onClick={() => fillSuggestion(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {opening && <div className="bubble assistant typing">Loading messages...</div>}
           {loading && !receiving && (
             <div className="bubble assistant typing">DocMind is typing...</div>
           )}
@@ -354,10 +461,12 @@ function ChatPage() {
 
         <div className="input-row">
           <textarea
+            ref={textareaRef}
             rows={2}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            aria-label="Your message"
             placeholder="Type a message... (Enter to send, Shift+Enter for a new line)"
           />
           {loading ? (
