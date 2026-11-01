@@ -14,6 +14,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - [x] Failed AI calls are undone, so no unanswered messages are left behind
 - [x] AI replies rendered as Markdown (lists, tables, code) with a Copy button
 - [x] Streaming AI replies with a Stop button
+- [x] Real page addresses (`/login`, `/register`, `/chat`), guarded routes, and a phone-friendly layout
 
 ### Planned
 - [ ] Chat with PDF documents
@@ -139,7 +140,8 @@ docs/      learning-log.md and tech-decisions.md
 | 11 | Safe Markdown rendering, Copy button, smarter scrolling | ✅ |
 | 12 | Streaming replies (Server-Sent Events) with a Stop button | ✅ |
 | 13 | Automated tests (unit, real-HTTP integration, frontend) | ✅ |
-| 14 | UI polish and routing | 🔜 Next |
+| 14 | React Router, route guards, phone drawer, loading/error/empty states | ✅ |
+| 15 | PDF upload | 🔜 Next |
 
 ## Roadmap
 Chat polish and tests, then PDF upload and chat with PDF, summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.

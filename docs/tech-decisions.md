@@ -96,6 +96,12 @@
 | 62 | Backend test tools | JUnit, Mockito, AssertJ, JDK `HttpClient` (no extra libraries) | ✅ |
 | 63 | Frontend test runner | Vitest | ✅ |
 | 64 | AI in tests | `app.ai.provider=fake` | ✅ |
+| 65 | Page routing | React Router (declarative `<Routes>`) | ✅ |
+| 66 | Access control in the UI | Layout-route guards (`ProtectedRoute`, `PublicOnlyRoute`) | ✅ |
+| 67 | Styling | Plain CSS with CSS variables | ✅ |
+| 68 | Small-screen layout | Off-canvas drawer for the chat list | ✅ |
+| 69 | Loading, error, and empty states | Explicit states for each async screen | ✅ |
+| 70 | Component tests | Vitest + jsdom + Testing Library | ✅ |
 
 ---
 
@@ -252,9 +258,16 @@
 - **Alternatives:** Hard-coding (never), Vault, cloud secret managers.
 - **Why not those:** Vault and cloud managers are the right answer in production, but env variables are enough here.
 
-### 3.18 Styling ❓
-- Options: Tailwind CSS, Material UI, plain CSS, Bootstrap.
-- To be decided on Day 2 or 3. We'll update this file.
+### 3.18 Styling: plain CSS with CSS variables ✅
+- **What:** Hand-written CSS. Colors and sizes live in CSS variables in `index.css`, and dark mode comes from `color-scheme` plus a few variable overrides.
+- **Why we chose it:** The whole stylesheet is a few hundred lines, so the cost of learning and configuring a new system is higher than the benefit. Variables give one place to change the look.
+- **Alternatives:** Tailwind CSS, a component library (MUI, Chakra), CSS Modules, styled-components.
+- **Why not those:**
+  - *Tailwind:* Very productive at scale, but it needs build setup and fills the markup with utility classes, which is a lot to learn while also learning React and Spring.
+  - *MUI / Chakra:* Quick and accessible by default, but heavy and they hide how layouts really work.
+  - *CSS Modules / styled-components:* Useful for bigger teams, and unnecessary for one small app.
+- **Trade-off:** More hand-written accessibility work. Revisit if the UI grows a lot (for example the PDF screens).
+- **Interview line:** "I chose plain CSS with variables because the app is small, and I would switch to Tailwind or a component library if the interface grew."
 
 ### 3.19 Deployment ❓
 - Options: Docker + Render / Railway / AWS, or a VPS.
@@ -407,7 +420,6 @@
 - **Token in localStorage** is readable by injected scripts (see 3.40).
 - **No refresh tokens:** users must log in again after 60 minutes.
 - **No rate limiting** on register, login, or the AI endpoint, and no email verification.
-- **If the backend is down on page load,** the user sees the login screen even with a saved token.
 - **Free-tier AI limits:** an HTTP 429 from the provider can interrupt long chats.
 - **Deleting a chat** uses `window.confirm` and cannot be undone.
 - **Streaming:** the Markdown of the whole reply is re-parsed for every piece (fine at these sizes). An interrupted reply is discarded, not resumed, and there are no reconnects.
@@ -415,6 +427,10 @@
 - **No React component or browser end-to-end tests yet** (the screens are tested by hand).
 - **No continuous integration:** tests run only on my computer for now.
 - **The integration tests use H2, not MySQL,** and the real Groq call is never tested automatically (it needs a key and costs quota).
+- **The open chat is not in the URL (no `/chat/12`),** so there are no per-chat links or Back-button history.
+- **Not tested on real phones or with a screen reader.**
+- **The chat screen itself (streaming, sidebar actions)** has no automated component tests yet.
+- **Static hosting needs** a "send every path to index.html" rule.
 
 ### 3.37 JWT with Spring's built-in resource server ✅
 - **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
@@ -468,11 +484,8 @@
 - **Why not those:** Axios interceptors would do the same job, with an extra dependency. TanStack Query is useful later for caching chat history.
 - **Details:** Login and register use `skipAuth`, so a stale token can't break them. Messages are written client-side because Spring Boot hides error text by default.
 
-### 3.43 No React Router yet ✅
-- **What:** `App` chooses between `AuthPage` and `ChatPage` using the logged-in state.
-- **Why we chose it:** Two screens don't need URL routing.
-- **Alternatives:** React Router, TanStack Router.
-- **Why not yet:** We'll add React Router when we have more pages (chat list, PDF upload, settings) or need bookmarkable URLs.
+### 3.43 Routing: from a hidden switch to React Router (updated Day 14) ✅
+- Until Day 13 `App` chose between the login and chat screens with a plain "is the user logged in" check. Day 14 replaces that with React Router (see 3.70).
 
 ### 3.44 Ownership checks in the service layer (IDOR prevention) ✅
 - **What:** Every lookup of a conversation includes the logged-in user's id (`findByIdAndUserId`). The user id comes from the verified JWT, not from anything the client sends.
@@ -637,6 +650,40 @@
 - **Why:** A test that cannot fail gives false confidence.
 - **Interview line:** "I verify my tests by introducing the bug they are supposed to catch."
 
+### 3.66 React Router with declarative routes ✅
+- **What:** `BrowserRouter` plus `<Routes>`: `/login` and `/register` (logged-out only), `/chat` (logged-in only), `/` redirects to `/chat`, and anything else shows a not-found page.
+- **Why we chose it:** Real addresses, a working Back button, and a clear place to add pages (PDF upload, settings) later. It is the most widely used router for React.
+- **Alternatives:** The old "if logged in" switch, TanStack Router, React Router's data router (`createBrowserRouter` with loaders), a full framework such as Next.js.
+- **Why not those:** The old switch has no addresses. TanStack Router is excellent but less common in job listings. Data routers add loaders and actions we do not need yet. Next.js would replace our separate Spring Boot backend model.
+- **Deferred:** The open chat id is still remembered in localStorage rather than in the address (`/chat/12`). That would give shareable links and Back-button history per chat, and it is a good later step.
+- **Deployment note:** A static host must send every path to `index.html`, or refreshing `/chat` will give a 404.
+
+### 3.67 Route guards are user experience, not security ✅
+- **What:** `ProtectedRoute` redirects logged-out visitors to `/login` and remembers where they were going. `PublicOnlyRoute` sends logged-in users away from `/login` and `/register`.
+- **Why we chose it:** Guards written as layout routes protect a whole group of pages in one place.
+- **Important:** Anyone can change what the browser shows, so a guard only improves the experience. The real protection is that the backend checks the token on every request and the ownership of every chat. The tests cover both sides.
+- **Interview line:** "Frontend route guards decide what to show. Authorization is enforced on the server."
+
+### 3.68 Responsive layout: a drawer, not a stacked list ✅
+- **What:** Under 700 pixels wide the chat list is a fixed drawer that slides over the chat, with a backdrop. Escape, a tap on the backdrop, or choosing a chat closes it. The button has `aria-expanded` and `aria-controls`.
+- **Why we chose it:** The old stacked list took a third of a phone screen. A drawer gives the conversation the full screen.
+- **Alternatives:** Keep the stacked list, a bottom navigation bar, a CSS-only checkbox trick.
+- **Why not those:** The stacked list wastes space, a bottom bar suits apps with several main sections, and the checkbox trick is harder to make accessible.
+- **Also done:** Visible `:focus-visible` outlines, `role="log"` with `aria-live="polite"` on the messages, a label on the message box, `100dvh` for phone browser bars, and reduced-motion support.
+- **Not done:** No screen-reader or real-phone testing yet.
+
+### 3.69 Every async screen has four states ✅
+- **What:** Chat list: loading placeholders, error with "Try again", empty message, and data. Opening a chat shows "Loading messages...". An empty chat offers three suggestion buttons. If the backend is down when the page loads, a dedicated screen offers "Try again" instead of the login page.
+- **Why:** Silent waiting and blank screens look broken. Showing the server-down state also stops us from mistaking "can't reach the server" for "not logged in".
+- **Detail:** The session check treats status 0 (network) and 5xx as "server down", and a 401 as "log in again".
+
+### 3.70 Component tests with jsdom and Testing Library ✅
+- **What:** Route guard tests render the real guards and pages inside a memory router with a fake auth context. One more test renders the whole app with a failing network and checks the server-down screen and its retry.
+- **Why we chose it:** The guards and the session logic are exactly where mistakes would hide, and they are cheap to test.
+- **Alternatives:** Browser end-to-end tests (Playwright or Cypress), manual testing only.
+- **Why not (yet):** End-to-end tests are slower and best added once the main screens settle, ideally in continuous integration.
+- **Verification:** Breaking `ProtectedRoute` on purpose made the matching test fail.
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -722,6 +769,15 @@ A: MockMvc skips the error dispatch, so a bug where Spring Security blocked the 
 **Q: How do you know your tests are any good?**
 A: I break the code on purpose. When I removed the owner check from the conversation lookup, the cross-user test failed, and when I locked the error path, the validation tests failed with 403.
 
+**Q: How do you protect pages in React, and is that real security?**
+A: With route guards written as layout routes: one redirects logged-out visitors to the login page, another keeps logged-in users off it. It is only for user experience, because anyone can edit what the browser shows. The server checks the token and the chat owner on every request, and tests cover that side.
+
+**Q: How do you handle loading and error states?**
+A: Each async screen has four states: loading, error with a retry, empty, and data. For example, if the backend is down when the app starts, the user sees a "cannot reach the server" screen with a retry button instead of being sent to the login page by mistake.
+
+**Q: Why plain CSS and not Tailwind or a component library?**
+A: The app is small, so I kept plain CSS with variables and spent my learning time on the backend and security. I would reconsider when the interface grows.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -766,6 +822,10 @@ A: I break the code on purpose. When I removed the owner check from the conversa
 | 13 | Tests failed with `Access denied` or could not reach MySQL | A test class started the app with the development settings because `@ActiveProfiles("test")` was missing, or `application-test.properties` was not in `src/test/resources` | Added `@ActiveProfiles("test")` and put the file in the right folder |
 | 13 | `Could not resolve com.h2database:h2` | The Maven project had not synchronized after editing `pom.xml` | Clicked synchronize or ran `.\mvnw clean test` |
 | 13 | Frontend tests failed with `localStorage is not defined` | Vitest runs in Node, which has no browser storage | Added a small `stubStorage()` helper that fakes `localStorage` |
+| 14 | ESLint error: `React Hook "useSuggestion" cannot be called inside a callback` | React treats any function whose name starts with `use` as a hook, and hooks cannot be called from a click handler | Renamed it to `fillSuggestion` |
+| 14 | White page: `useLocation() may be used only in the context of a <Router>` | `BrowserRouter` was missing around the app in `main.jsx` | Wrapped `<AuthProvider>` in `<BrowserRouter>` |
+| 14 | `npm install react-router` failed with a peer dependency error | The installed React version was older than the router requires | Ran `npm install react@latest react-dom@latest`, then installed the router again |
+| 14 | Component tests failed with `document is not defined` | Vitest runs in Node unless told otherwise | Added `// @vitest-environment jsdom` as the first line of the test file |
 
 ---
 
@@ -802,3 +862,4 @@ Copy this each time we add a tool:
 | 11 | Added safe Markdown rendering, untrusted-output note, copy button, and auto-scroll decisions; updated known limitations |
 | 12 | Added streaming decisions (SSE, fetch reader, virtual threads, protocol, failure rules, provider stream parsing); updated known limitations |
 | 13 | Added test strategy, H2 test database, real-HTTP integration tests, mocking, Vitest, and the "tests must fail first" decisions; fixed leftover doc errors from the Day 12 review |
+| 14 | Added routing, route guard, responsive drawer, UI states, and component test decisions; settled the styling decision (3.18); updated known limitations |

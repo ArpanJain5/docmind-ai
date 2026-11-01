@@ -116,3 +116,14 @@
 - Broke the app on purpose (removed the ownership check, locked /error, broke the 401 rule) and watched the right tests fail
 - Learned: flipping the last character of a base64 JWT signature may not change its bytes, so tamper with the first character
 - Kept real secrets out of the test profile and used the fake AI so tests are free and offline
+
+## Day 14
+- Added React Router: /login, /register, /chat, a not-found page, and a redirect from /
+- Built route guards as layout routes (ProtectedRoute and PublicOnlyRoute); learned they are for user experience, and the backend enforces the real security
+- Fixed an old limitation: if the backend is down on page load the app now says so, with a Try again button, instead of showing the login page
+- Added the four faces of a screen: loading placeholders, error with retry, empty state with suggestion buttons, and data
+- Turned the chat list into a drawer on phone-sized screens (Escape and backdrop close it)
+- Added accessibility basics: visible keyboard focus, labels, live region for new messages, reduced-motion support
+- Moved colors and sizes into CSS variables and recorded the decision to keep plain CSS
+- Added component tests with jsdom and Testing Library (route guards and the server-down screen)
+- Learned: React treats function names starting with "use" as hooks
