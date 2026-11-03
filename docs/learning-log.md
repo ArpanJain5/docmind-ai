@@ -127,3 +127,14 @@
 - Moved colors and sizes into CSS variables and recorded the decision to keep plain CSS
 - Added component tests with jsdom and Testing Library (route guards and the server-down screen)
 - Learned: React treats function names starting with "use" as hooks
+
+## Day 15
+- Built PDF upload: POST /api/documents (multipart), GET /api/documents, DELETE /api/documents/{id}
+- Learned: a file upload is multipart/form-data, and the server must set size limits (5 MB per file)
+- Learned: a file name and a Content-Type are only claims, so the server checks the first bytes (%PDF-)
+- Learned: store files under a random name in a git-ignored folder, and keep the person's file name only for display
+- Added a documents table with an owner; every lookup includes the user id (404 for other people's documents)
+- Learned: delete the database row first, then the file, so a failure never leaves a row pointing at nothing
+- Built a documents page in React with upload progress (XMLHttpRequest, because fetch cannot report upload progress)
+- Wrote 8 backend tests (wrong type, empty, too big, hostile file name, other user's document) and 15 frontend tests
+- Broke the code on purpose (removed the PDF check, removed the owner check, skipped name cleaning) and watched the right tests fail

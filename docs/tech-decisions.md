@@ -47,7 +47,7 @@
 | 10 | Authentication | Spring Security + JWT | ✅ |
 | 11 | Frontend library | React | ✅ (Day 2) |
 | 12 | Frontend tooling | Vite | ✅ (Day 2) |
-| 13 | Groq API (free tier, OpenAI-compatible), behind an AiService interface ✅
+| 13 | AI provider | Groq API (free tier, OpenAI-compatible), behind an AiService interface | ✅ |
 | 14 | PDF text extraction | Apache PDFBox | 🔜 |
 | 15 | Chat-with-PDF approach | Chunking + retrieval (RAG) | 🔜 |
 | 16 | Secrets handling | Environment variables | 🔜 |
@@ -102,6 +102,15 @@
 | 68 | Small-screen layout | Off-canvas drawer for the chat list | ✅ |
 | 69 | Loading, error, and empty states | Explicit states for each async screen | ✅ |
 | 70 | Component tests | Vitest + jsdom + Testing Library | ✅ |
+| 71 | File upload format | `multipart/form-data` with Spring `MultipartFile` | ✅ |
+| 72 | Upload size limit | 5 MB per file, set in `spring.servlet.multipart`, with a clean 413 | ✅ |
+| 73 | File type check | The first bytes (`%PDF-`), not the name or Content-Type | ✅ |
+| 74 | Where files live | Local folder (`app.storage.dir`), random UUID names, metadata in MySQL | ✅ |
+| 75 | The person's file name | Stored for display only, cleaned, never used as a path | ✅ |
+| 76 | Document ownership | `documents.user_id` plus `findByIdAndUserId`, 404 for others | ✅ |
+| 77 | Delete order | Database row first, then the file | ✅ |
+| 78 | Upload progress in React | `XMLHttpRequest` for uploads, `fetch` for everything else | ✅ |
+| 79 | Checks in the browser | Quick validation for user experience, the server decides | ✅ |
 
 ---
 
@@ -224,7 +233,6 @@
   - *Which hosted provider:* To be finalized. We'll hide the provider behind an `AiService` interface so we can swap providers without changing controllers.
 - **Spam detector note:** A traditional ML classifier (Naive Bayes, etc.) is cheaper at scale, but an LLM needs no training data, so it's the faster option for this project. We note the trade-off in interviews.
 - **Security rule:** The API key lives in an environment variable and is never committed. The browser never sees it, because only the backend calls the AI.
-- **Decision (Day 9):** Change to Groq (or delete that older bullet, since the next one already says Groq). It has a single HTTPS endpoint, simple authentication (an API key header), clear documentation, and models with large context windows, which should help with PDF chat later. I have not benchmarked providers against each other yet. Because the provider sits behind `AiService`, comparing OpenAI, Gemini, or a local model means writing one new class, and the result of that comparison will be recorded here.
 - **Dev tip:** Use the small, cheap model tier for development, and the fake provider for work that doesn't need real AI.
 - **Decision (Day 9):** We use the groq API on its free tier with the open-weight model `openai/gpt-oss-120b`, because I have no budget for a paid API. Groq exposes an OpenAI-compatible `/chat/completions` endpoint. As of October 2026 its published free limits for this model are 30 requests/min, 1,000 requests/day, 8,000 tokens/min, and 200,000 tokens/day (these change, so re-check).
 - **Why not a paid provider (Anthropic, OpenAI):** Cost. Because of the `AiService` interface, switching later means writing one class or changing a base URL.
@@ -431,6 +439,11 @@
 - **Not tested on real phones or with a screen reader.**
 - **The chat screen itself (streaming, sidebar actions)** has no automated component tests yet.
 - **Static hosting needs** a "send every path to index.html" rule.
+- **Uploads are only checked by their first bytes** (`%PDF-`). A broken or malicious file can still start that way. Apache PDFBox will really parse it on Day 16.
+- **No per-user storage quota or upload rate limit.** One user could fill the disk. Planned with rate limiting (Day 30).
+- **Files live on the local disk,** which does not survive a container restart or several servers without a mounted volume. Revisit with Docker and deployment.
+- **No antivirus scan** and **no download endpoint** yet. A failed file delete can leave an unused file on disk (harmless, but never cleaned up).
+- **Delete uses `window.confirm`** for documents too (real modal planned for Day 35).
 
 ### 3.37 JWT with Spring's built-in resource server ✅
 - **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
@@ -684,6 +697,72 @@
 - **Why not (yet):** End-to-end tests are slower and best added once the main screens settle, ideally in continuous integration.
 - **Verification:** Breaking `ProtectedRoute` on purpose made the matching test fail.
 
+### 3.71 multipart/form-data uploads ✅
+- **What:** The browser sends the file as `multipart/form-data`. Spring gives the controller a `MultipartFile`.
+- **Why we chose it:** It is the standard way to send files from a form, it is streamed to disk, and it needs no extra library.
+- **Alternatives:** Base64 inside JSON, sending the raw bytes with `PUT`, direct upload to cloud storage with a signed URL.
+- **Why not those:** Base64 makes the upload about a third bigger and loads it all into memory. Raw `PUT` cannot carry other fields easily. Signed URLs are the right answer at scale but need a cloud account and more moving parts.
+- **Interview line:** "Files go as multipart so they stream to disk instead of being encoded into JSON."
+
+### 3.72 Upload size limits ✅
+- **What:** `spring.servlet.multipart.max-file-size=5MB` and `max-request-size=6MB`. A small exception handler turns "too big" into a clean 413. React checks the size too.
+- **Why we chose it:** Without a limit, one person can fill the disk or the memory. The free AI tier also cannot read huge documents anyway (8,000 tokens per minute).
+- **Alternatives:** No limit, a limit only in React, a limit only at a reverse proxy.
+- **Why not those:** No limit is a denial-of-service risk. A limit only in React can be skipped with curl. A proxy limit is good later (deployment) as an extra layer, not the only one.
+- **Trade-off:** There is still no per-user quota (see 3.36).
+- **Interview line:** "Limits are enforced on the server. The browser check is only for a nicer message."
+
+### 3.73 Checking the file type by its first bytes ✅
+- **What:** The server reads the first five bytes and requires `%PDF-`. The file name and the Content-Type header are ignored.
+- **Why we chose it:** Both the name and the Content-Type are chosen by the sender. A text file named `a.pdf` would pass a name check.
+- **Alternatives:** Check the extension, trust the Content-Type, fully parse the PDF now, use Apache Tika to detect the type.
+- **Why not those:** Extension and Content-Type are claims. Full parsing is Day 16 (PDFBox will reject a broken file). Tika is heavier than needed for one type.
+- **Limit:** A file can start with `%PDF-` and still be broken or malicious. This is a cheap first gate, not a full guarantee.
+- **Interview line:** "I do not trust names or headers from the client. I check the real bytes, and I know that is only the first gate."
+
+### 3.74 Storing files on local disk with random names ✅
+- **What:** Files are saved in `app.storage.dir` (git-ignored `uploads/`) as `<uuid>.pdf`. MySQL stores only metadata: owner, original name, stored name, size, status.
+- **Why we chose it:** It is the simplest thing that works and costs nothing. A random name means a hostile file name can never choose where a file lands, and two people uploading `cv.pdf` never collide.
+- **Alternatives:** Store the bytes in a MySQL `BLOB`, cloud storage (S3 or similar), keep the person's file name.
+- **Why not those:** A `BLOB` bloats the database and its backups. Cloud storage is the right answer for deployment but needs an account and keys (we will revisit it on Day 33 and 34). The person's file name allows path tricks and collisions.
+- **Trade-off:** Local disk does not survive a container restart or several servers unless the folder is a mounted volume.
+- **Interview line:** "Metadata in the database, bytes on disk under a name I generate. In production I would move the bytes to object storage."
+
+### 3.75 The original file name is for display only ✅
+- **What:** The name is cleaned (path parts and control characters removed, length capped) and saved in the database. It is shown in React as text, which React escapes. It is never used to build a path.
+- **Why we chose it:** People want to see their own file name. A name like `../../x` or one containing script text is just data if it never reaches a path or raw HTML.
+- **Alternatives:** Reject odd names, keep the name exactly as sent.
+- **Why not those:** Rejecting annoys real users. Keeping it exactly is harmless only if every later use stays careful, so we clean once at the door.
+- **Interview line:** "User-supplied names are data. They go on screen, never into a file path."
+
+### 3.76 Document ownership and 404 ✅
+- **What:** `documents.user_id` is required. Every lookup uses `findByIdAndUserId` with the id from the verified token. Other people's documents return 404.
+- **Why we chose it:** It is exactly the Day 8 rule (3.44, 3.45) applied to a new kind of data. Documents will hold the most private text in the app.
+- **Alternatives:** A check in the controller, unguessable ids only.
+- **Why not those:** The same reasons as 3.44.
+- **Interview line:** "Same rule, new table: the owner is part of every query."
+
+### 3.77 Delete the database row first, then the file ✅
+- **What:** `delete` removes the row, then deletes the file. A failed file delete is only logged.
+- **Why we chose it:** If the order were reversed and the database delete failed, a row would point at a missing file, which breaks the app. A leftover file is invisible and harmless.
+- **Alternatives:** A transaction around both (a file system cannot join a database transaction), a background cleanup job.
+- **Why not those:** The first is not possible. The second is a later improvement for orphan files.
+- **Same idea on upload:** if saving the row fails, the new file is deleted again.
+- **Interview line:** "Two systems cannot share one transaction, so I order the steps so the failure case is harmless."
+
+### 3.78 XMLHttpRequest for uploads, fetch for the rest ✅
+- **What:** `uploadDocument` uses `XMLHttpRequest` so the browser can report upload progress. Everything else still uses `fetch` through `request()`.
+- **Why we chose it:** `fetch` has no upload progress event. A progress bar matters for slow connections.
+- **Alternatives:** `fetch` without progress, Axios (it wraps `XMLHttpRequest`), a resumable upload library.
+- **Why not those:** Plain `fetch` would leave a silent wait. Axios would be a new dependency for one function. Resumable uploads are for very large files.
+- **Detail:** We do not set `Content-Type`. The browser adds `multipart/form-data` with the boundary.
+- **Interview line:** "I used the older API only where the newer one cannot do the job."
+
+### 3.79 Validation in the browser is a courtesy ✅
+- **What:** React checks name, emptiness and size before sending. The server checks everything again.
+- **Why:** It gives an instant message and saves bandwidth. It can be bypassed with curl, so it protects nothing.
+- **Interview line:** "Frontend validation is for user experience, backend validation is for security." (same as 3.33)
+
 ---
 
 ## 4. Common Interview Questions (and how to answer)
@@ -778,6 +857,18 @@ A: Each async screen has four states: loading, error with a retry, empty, and da
 **Q: Why plain CSS and not Tailwind or a component library?**
 A: The app is small, so I kept plain CSS with variables and spent my learning time on the backend and security. I would reconsider when the interface grows.
 
+**Q: How do you handle file uploads securely?**
+A: Multipart upload with a 5 MB limit, a check of the first bytes (not the file name or Content-Type), a random name on disk, an owner on every record, and a clean display name. I tested a text file named .pdf, an empty file, an oversized file, a name like ../../evil.pdf, and another user's document.
+
+**Q: Why do you not trust the Content-Type or the extension?**
+A: The client chooses both. A script can send any text with a PDF name and PDF type. I read the actual first bytes instead.
+
+**Q: Why store files on disk and not in the database?**
+A: Large binary data makes the database and its backups heavy. I keep metadata in MySQL and bytes on disk, and I would move the bytes to object storage in production.
+
+**Q: Why use XMLHttpRequest in a modern React app?**
+A: Only for uploads, because fetch cannot report upload progress. Everything else uses fetch through one helper.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -801,7 +892,7 @@ A: The app is small, so I kept plain CSS with variables and spent my learning ti
 | 7 | Expired token caused 401 even on open endpoints like `/api/chat` | The bearer-token filter validates any token that is sent, even to `permitAll` endpoints | Skipped the token for login/register and made `request()` clear the token and log out on a 401 |
 | 8 | Backend would not start after adding `user_id` (null or foreign key error) | The `conversations` table still had old rows with no owner, and the new column is required | Deleted old rows from `messages` and `conversations`, then restarted |
 | 8 | Everything returned 401 in PowerShell tests | The saved token was older than 60 minutes or missing | Logged in again to get a fresh token |
-| 9 | Backend failed to start: no bean of type `AiService` | `app.ai.provider` was missing or misspelled, so neither implementation was created | Set it to `fake` or `grok` exactly |
+| 9 | Backend failed to start: no bean of type `AiService` | `app.ai.provider` was missing or misspelled, so neither implementation was created | Set it to `fake` or `groq` exactly |
 | 9 | AI call failed with HTTP 401 | The API key was wrong, or was pasted with quotes or spaces | Pasted the key again with no quotes or spaces and restarted |
 | 9 | AI call failed with HTTP 404 about the model | The model ID in `app.ai.model` was wrong or retired | Copied a current model ID from the provider's models page |
 | 9 | AI call failed with a billing or credit error | The provider account had no credit | Added credit and set a spending limit in the console |
@@ -826,6 +917,9 @@ A: The app is small, so I kept plain CSS with variables and spent my learning ti
 | 14 | White page: `useLocation() may be used only in the context of a <Router>` | `BrowserRouter` was missing around the app in `main.jsx` | Wrapped `<AuthProvider>` in `<BrowserRouter>` |
 | 14 | `npm install react-router` failed with a peer dependency error | The installed React version was older than the router requires | Ran `npm install react@latest react-dom@latest`, then installed the router again |
 | 14 | Component tests failed with `document is not defined` | Vitest runs in Node unless told otherwise | Added `// @vitest-environment jsdom` as the first line of the test file |
+| 15 | `Could not resolve placeholder 'app.storage.dir'` at startup or in tests | The property was missing from `application.properties` or `application-test.properties` | Added `app.storage.dir` to both files |
+| 15 | A real-looking upload returned 415 | The test file did not start with `%PDF-` | Used a real PDF (the server checks the first bytes, not the name) |
+| 15 | The Documents link looked underlined | A `Link` is an `<a>` tag, and `.new-chat` was written for a button | Added `text-decoration: none` to `.new-chat` |
 
 ---
 
