@@ -25,6 +25,17 @@ export function setUnauthorizedHandler(handler) {
   onUnauthorized = handler;
 }
 
+// ---- small helpers for code that cannot use request() (like the upload with progress) ----
+export function apiUrl(path) {
+  return `${API_BASE}${path}`;
+}
+
+export function handleUnauthorized() {
+  if (onUnauthorized) {
+    onUnauthorized();
+  }
+}
+
 // ---- a clean error type that carries the HTTP status ----
 export class ApiError extends Error {
   constructor(status, message) {
@@ -33,11 +44,13 @@ export class ApiError extends Error {
   }
 }
 
-function defaultMessage(status) {
+export function friendlyMessage(status) {
   if (status === 400) return "Please check what you entered.";
   if (status === 401) return "Your session expired. Please log in again.";
   if (status === 404) return "Not found.";
   if (status === 409) return "That already exists.";
+  if (status === 413) return "That file is too large. The limit is 5 MB.";
+  if (status === 415) return "Only real PDF files are accepted.";
   if (status === 502 || status === 503 || status === 504) {
     return "The AI service is unavailable right now. Please try again in a moment.";
   }
@@ -74,7 +87,7 @@ export async function request(path, { method = "GET", body, skipAuth = false } =
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, defaultMessage(response.status));
+    throw new ApiError(response.status, friendlyMessage(response.status));
   }
 
   if (response.status === 204) {
@@ -116,7 +129,7 @@ export async function requestStream(path, { body, signal } = {}) {
   }
 
   if (!response.ok) {
-    throw new ApiError(response.status, defaultMessage(response.status));
+    throw new ApiError(response.status, friendlyMessage(response.status));
   }
 
   if (!response.body) {

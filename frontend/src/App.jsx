@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router";
 import { useAuth } from "./auth/AuthContext";
 import AuthPage from "./pages/AuthPage";
 import ChatPage from "./pages/ChatPage";
+import DocumentsPage from "./pages/DocumentsPage";
 import NotFoundPage from "./pages/NotFoundPage";
 import ProtectedRoute from "./routes/ProtectedRoute";
 import PublicOnlyRoute from "./routes/PublicOnlyRoute";
@@ -41,6 +42,7 @@ function App() {
 
       <Route element={<ProtectedRoute />}>
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/documents" element={<DocumentsPage />} />
       </Route>
 
       <Route path="/" element={<Navigate to="/chat" replace />} />

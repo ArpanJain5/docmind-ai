@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
 import {
   deleteConversation,
   fetchConversations,
@@ -420,6 +421,9 @@ function ChatPage() {
             <button className="new-chat" onClick={handleNewChat} disabled={busy}>
               New chat
             </button>
+            <Link className="new-chat" to="/documents">
+              Documents
+            </Link>
             <button className="new-chat" onClick={logout} disabled={busy}>
               Log out
             </button>
