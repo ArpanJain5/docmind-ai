@@ -2,6 +2,8 @@ package com.docmind.backend.service;
 
 import com.docmind.backend.dto.DocumentResponse;
 import com.docmind.backend.model.Document;
+import com.docmind.backend.model.DocumentStatus;
+import com.docmind.backend.model.DocumentText;
 import com.docmind.backend.model.User;
 import com.docmind.backend.repository.DocumentRepository;
 import com.docmind.backend.repository.UserRepository;
@@ -10,9 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.io.BufferedInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -26,13 +26,16 @@ public class DocumentService {
     private final DocumentRepository documentRepository;
     private final UserRepository userRepository;
     private final FileStorageService storage;
+    private final PdfTextExtractor extractor;
 
     public DocumentService(DocumentRepository documentRepository,
                            UserRepository userRepository,
-                           FileStorageService storage) {
+                           FileStorageService storage,
+                           PdfTextExtractor extractor) {
         this.documentRepository = documentRepository;
         this.userRepository = userRepository;
         this.storage = storage;
+        this.extractor = extractor;
     }
 
     public DocumentResponse upload(Long userId, MultipartFile file) {
@@ -44,11 +47,12 @@ public class DocumentService {
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.UNAUTHORIZED, "User no longer exists"));
 
-        String storedName = storeIfItIsAPdf(file);
+        byte[] bytes = readBytesIfItLooksLikeAPdf(file);                 // 415 if not
+        PdfTextExtractor.Extracted extracted = extractor.extract(bytes); // 422 if unreadable
+        String storedName = storeOnDisk(bytes);
 
         try {
-            Document saved = documentRepository.save(
-                    new Document(user, cleanName(file.getOriginalFilename()), storedName, file.getSize()));
+            Document saved = documentRepository.save(buildDocument(user, file, storedName, extracted));
             return DocumentResponse.from(saved);
         } catch (RuntimeException e) {
             storage.delete(storedName); // do not leave a file with no database row
@@ -65,28 +69,60 @@ public class DocumentService {
 
     public void delete(Long userId, Long documentId) {
         Document document = findOwned(userId, documentId); // 404 unless it is YOURS
-        documentRepository.delete(document);               // row first...
+        documentRepository.delete(document);               // row first (the text goes with it)...
         storage.delete(document.getStoredFilename());      // ...then the file
     }
 
     // ---------- helpers ----------
 
-    // Looks at the real first bytes, not the file name or the Content-Type (both are just claims)
-    private String storeIfItIsAPdf(MultipartFile file) {
-        try (InputStream in = new BufferedInputStream(file.getInputStream())) {
-            in.mark(PDF_MAGIC.length);
-            byte[] head = in.readNBytes(PDF_MAGIC.length);
-            in.reset();
+    // The first gate: look at the real first bytes, not the file name or the Content-Type
+    private byte[] readBytesIfItLooksLikeAPdf(MultipartFile file) {
+        byte[] bytes;
+        try {
+            bytes = file.getBytes(); // at most 5 MB, the multipart limit protects us
+        } catch (IOException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.INTERNAL_SERVER_ERROR, "Could not read the upload", e);
+        }
 
-            if (!Arrays.equals(head, PDF_MAGIC)) {
-                throw new ResponseStatusException(
-                        HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only PDF files are accepted");
-            }
-            return storage.save(in);
+        boolean startsLikeAPdf = bytes.length >= PDF_MAGIC.length
+                && Arrays.equals(bytes, 0, PDF_MAGIC.length, PDF_MAGIC, 0, PDF_MAGIC.length);
+        if (!startsLikeAPdf) {
+            throw new ResponseStatusException(
+                    HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Only PDF files are accepted");
+        }
+        return bytes;
+    }
+
+    private String storeOnDisk(byte[] bytes) {
+        try {
+            return storage.save(bytes);
         } catch (IOException e) {
             throw new ResponseStatusException(
                     HttpStatus.INTERNAL_SERVER_ERROR, "Could not store the file", e);
         }
+    }
+
+    private Document buildDocument(User user, MultipartFile file, String storedName,
+                                   PdfTextExtractor.Extracted extracted) {
+        Document document = new Document(user, cleanName(file.getOriginalFilename()),
+                storedName, file.getSize());
+        document.setPageCount(extracted.pageCount());
+
+        if (extracted.text().isBlank()) {
+            document.setStatus(DocumentStatus.NO_TEXT); // a valid PDF, but nothing to read (a scan)
+        } else {
+            document.setStatus(DocumentStatus.READY);
+            document.setPreview(makePreview(extracted.text()));
+            document.setText(new DocumentText(extracted.text()));
+        }
+        return document;
+    }
+
+    // The first 300 characters on one line
+    static String makePreview(String text) {
+        String oneLine = text.replaceAll("\\s+", " ").strip();
+        return oneLine.length() > 300 ? oneLine.substring(0, 300) : oneLine;
     }
 
     // "../../evil.pdf" becomes "evil.pdf". The name is for display only, but we clean it anyway.

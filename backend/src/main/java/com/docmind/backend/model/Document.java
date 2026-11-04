@@ -1,5 +1,6 @@
 package com.docmind.backend.model;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -10,10 +11,13 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 
@@ -44,9 +48,24 @@ public class Document {
     @Column(nullable = false)
     private long sizeBytes;
 
+    // VARCHAR on purpose: Hibernate would otherwise create a MySQL enum(...) column
+    // that "update" can never extend when we add a new status.
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(nullable = false, length = 20)
     private DocumentStatus status = DocumentStatus.UPLOADED;
+
+    // null for old Day 15 rows that were never read
+    private Integer pageCount;
+
+    // The first 300 characters, for showing in lists
+    @Column(length = 300)
+    private String preview;
+
+    // The full text. LAZY: only loaded when someone really asks for it.
+    @OneToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @JoinColumn(name = "text_id")
+    private DocumentText text;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();

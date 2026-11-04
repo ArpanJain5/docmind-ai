@@ -6,7 +6,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -29,9 +28,9 @@ public class FileStorageService {
     }
 
     // Saves the bytes under a name WE invent. The person's file name never touches the disk.
-    public String save(InputStream content) throws IOException {
+    public String save(byte[] content) throws IOException {
         String storedName = UUID.randomUUID() + ".pdf";
-        Files.copy(content, root.resolve(storedName));
+        Files.write(root.resolve(storedName), content);
         return storedName;
     }
 

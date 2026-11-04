@@ -32,8 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class DocumentApiTest {
 
     private static final String PASSWORD = "CorrectHorse123";
-    private static final byte[] TINY_PDF =
-            "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n".getBytes(StandardCharsets.US_ASCII);
+    private static final byte[] TINY_PDF = TestPdfs.withText("Hello DocMind");
 
     @Value("${local.server.port}")
     private int port;
@@ -55,6 +54,9 @@ class DocumentApiTest {
         HttpResponse<String> created = upload(token, "file", "My Secret Report.pdf", TINY_PDF);
 
         assertThat(created.statusCode()).isEqualTo(201);
+        assertThat((String) JsonPath.read(created.body(), "$.status")).isEqualTo("READY");
+        assertThat((Integer) JsonPath.read(created.body(), "$.pageCount")).isEqualTo(1);
+        assertThat((String) JsonPath.read(created.body(), "$.preview")).contains("Hello DocMind");
         assertThat((String) JsonPath.read(created.body(), "$.originalFilename")).isEqualTo("My Secret Report.pdf");
         assertThat(((Number) JsonPath.read(created.body(), "$.sizeBytes")).longValue()).isEqualTo(TINY_PDF.length);
         assertThat(created.body()).doesNotContain("storedFilename");
@@ -159,6 +161,29 @@ class DocumentApiTest {
         Path storage = Path.of(storageDir).toAbsolutePath().normalize();
         assertThat(Files.exists(storage.getParent().resolve("evil.pdf"))).isFalse();
         assertThat(Files.exists(storage.resolve("evil.pdf"))).isFalse();
+    }
+
+    @Test
+    void aPdfLookingFileThatCannotBeReadIsRefusedWith422AndNothingIsStored() throws Exception {
+        String token = registerAndLogin();
+        Set<String> before = filesOnDisk();
+        byte[] broken = "%PDF-1.4\nthis is not a real pdf at all\n".getBytes(StandardCharsets.US_ASCII);
+
+        assertThat(upload(token, "file", "broken.pdf", broken).statusCode()).isEqualTo(422);
+        assertThat(listSize(token)).isEqualTo(0);
+        assertThat(filesOnDisk()).isEqualTo(before);
+    }
+
+    @Test
+    void aPdfWithoutTextIsAcceptedButMarkedNoText() throws Exception {
+        String token = registerAndLogin();
+
+        HttpResponse<String> created = upload(token, "file", "scan.pdf", TestPdfs.blank(2));
+
+        assertThat(created.statusCode()).isEqualTo(201);
+        assertThat((String) JsonPath.read(created.body(), "$.status")).isEqualTo("NO_TEXT");
+        assertThat((Integer) JsonPath.read(created.body(), "$.pageCount")).isEqualTo(2);
+        assertThat((Object) JsonPath.read(created.body(), "$.preview")).isNull();
     }
 
     // ---------- helpers ----------

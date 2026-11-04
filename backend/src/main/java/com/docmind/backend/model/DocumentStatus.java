@@ -1,6 +1,7 @@
 package com.docmind.backend.model;
 
-// Day 16 will add more steps (for example text extracted, or failed)
 public enum DocumentStatus {
-    UPLOADED
+    UPLOADED, // old Day 15 rows that were never read
+    READY,    // text extracted
+    NO_TEXT   // a valid PDF with no text inside (for example a scan)
 }
