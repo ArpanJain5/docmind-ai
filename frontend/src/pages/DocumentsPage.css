@@ -128,3 +128,47 @@
 .docs-delete:hover:not(:disabled) {
   background: var(--danger-surface);
 }
+
+.docs-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.docs-badge {
+  padding: 1px 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.docs-badge-ready {
+  color: #2e9d5b;
+}
+
+.docs-badge-warn {
+  color: #d9a03a;
+}
+
+.docs-badge-muted {
+  opacity: 0.7;
+}
+
+.docs-preview {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.docs-note {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}

@@ -20,9 +20,14 @@ const doc = {
   id: 1,
   originalFilename: "report.pdf",
   sizeBytes: 2048,
-  status: "UPLOADED",
+  status: "READY",
+  pageCount: 3,
+  preview: "DocMind test article, page 1 This is a small test document",
   createdAt: "2026-11-03T10:00:00Z",
 };
+
+const scan = { ...doc, id: 2, originalFilename: "scan.pdf", status: "NO_TEXT", pageCount: 1, preview: null };
+const oldRow = { ...doc, id: 3, originalFilename: "old.pdf", status: "UPLOADED", pageCount: null, preview: null };
 
 function renderPage() {
   const auth = { user: { displayName: "Arpan" }, logout() {} };
@@ -54,6 +59,32 @@ describe("DocumentsPage", () => {
     expect(screen.getByText(/2 KB/)).toBeTruthy();
   });
 
+    it("shows the status, the page count and the preview of a readable document", async () => {
+    api.fetchDocuments.mockResolvedValue([doc]);
+    renderPage();
+
+    expect(await screen.findByText("Text ready")).toBeTruthy();
+    expect(screen.getByText(/3 pages/)).toBeTruthy();
+    expect(screen.getByText(/DocMind test article, page 1/)).toBeTruthy();
+  });
+
+  it("explains a PDF without text", async () => {
+    api.fetchDocuments.mockResolvedValue([scan]);
+    renderPage();
+
+    expect(await screen.findByText("No text found")).toBeTruthy();
+    expect(screen.getByText(/looks like a scan/)).toBeTruthy();
+    expect(screen.getByText(/1 page(?!s)/)).toBeTruthy();
+  });
+
+  it("handles an old row that was never read", async () => {
+    api.fetchDocuments.mockResolvedValue([oldRow]);
+    renderPage();
+
+    expect(await screen.findByText("Not read yet")).toBeTruthy();
+    expect(screen.queryByText(/pages?\b/)).toBeNull(); // no page count to show
+  });
+  
   it("shows an error with a retry that works", async () => {
     api.fetchDocuments.mockRejectedValueOnce(new Error("Cannot reach the server."));
     api.fetchDocuments.mockResolvedValueOnce([doc]);

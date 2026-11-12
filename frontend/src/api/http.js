@@ -51,6 +51,7 @@ export function friendlyMessage(status) {
   if (status === 409) return "That already exists.";
   if (status === 413) return "That file is too large. The limit is 5 MB.";
   if (status === 415) return "Only real PDF files are accepted.";
+  if (status === 422) return "We could not read that PDF. It may be damaged, password-protected or longer than 200 pages.";
   if (status === 502 || status === 503 || status === 504) {
     return "The AI service is unavailable right now. Please try again in a moment.";
   }

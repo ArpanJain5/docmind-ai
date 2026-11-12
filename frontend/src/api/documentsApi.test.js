@@ -95,6 +95,12 @@ describe("uploadDocument", () => {
 
     FakeXhr.plan.status = 413;
     await expect(uploadDocument(pdf())).rejects.toMatchObject({ status: 413, message: /too large/ });
+
+    FakeXhr.plan.status = 422;
+    await expect(uploadDocument(pdf())).rejects.toMatchObject({
+      status: 422,
+      message: /could not read that PDF/,
+    });
   });
 
   it("reports a network failure as status 0", async () => {

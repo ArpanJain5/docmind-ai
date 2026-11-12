@@ -8,14 +8,23 @@ import {
   uploadDocument,
   validateFile,
 } from "../api/documentsApi";
-import { formatSize } from "../utils/format";
+import { describeStatus } from "../utils/documentStatus";
+import { formatPages, formatSize } from "../utils/format";
 import "./DocumentsPage.css";
+
+// "2 KB · 3 pages · 04/11/2026" (old rows have no page count, so it is left out)
+function describeMeta(doc) {
+  const parts = [formatSize(doc.sizeBytes)];
+  if (doc.pageCount != null) parts.push(formatPages(doc.pageCount));
+  parts.push(new Date(doc.createdAt).toLocaleDateString());
+  return parts.join(" · ");
+}
 
 function DocumentsPage() {
   usePageTitle("Documents");
   const { user, logout } = useAuth();
 
-  // The list has the usual faces: loading, error, ready (empty or not)
+  // The list has four faces: loading, error, ready (empty or not)
   const [list, setList] = useState({ status: "loading", docs: [], message: "" });
   const [attempt, setAttempt] = useState(0);
 
@@ -151,24 +160,37 @@ function DocumentsPage() {
 
       {list.status === "ready" && list.docs.length > 0 && (
         <ul className="docs-list">
-          {list.docs.map((doc) => (
-            <li key={doc.id} className="docs-item">
-              <div className="docs-info">
-                <span className="docs-name">{doc.originalFilename}</span>
-                <span className="docs-meta">
-                  {formatSize(doc.sizeBytes)} · {new Date(doc.createdAt).toLocaleDateString()}
-                </span>
-              </div>
-              <button
-                className="docs-btn docs-delete"
-                onClick={() => handleDelete(doc)}
-                disabled={deletingId === doc.id}
-                aria-label={`Delete ${doc.originalFilename}`}
-              >
-                {deletingId === doc.id ? "Deleting..." : "Delete"}
+          {list.docs.map((doc) => {
+            const status = describeStatus(doc.status);
+            return (
+              <li key={doc.id} className="docs-item">
+                <div className="docs-info">
+                  <div className="docs-top">
+                    <span className="docs-name">{doc.originalFilename}</span>
+                    <span className={`docs-badge docs-badge-${status.tone}`}>{status.label}</span>
+                  </div>
+                  <span className="docs-meta">{describeMeta(doc)}</span>
+                  {doc.status === "READY" && doc.preview && (
+                    <p className="docs-preview">{doc.preview}</p>
+                  )}
+                  {doc.status === "NO_TEXT" && (
+                    <p className="docs-note">
+                      No text found. This looks like a scan or an image-only PDF, which DocMind
+                      cannot read yet.
+                    </p>
+                  )}
+                </div>
+                <button
+                  className="docs-btn docs-delete"
+                  onClick={() => handleDelete(doc)}
+                  disabled={deletingId === doc.id}
+                  aria-label={`Delete ${doc.originalFilename}`}
+                >
+                  {deletingId === doc.id ? "Deleting..." : "Delete"}
                 </button>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
