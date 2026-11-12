@@ -48,7 +48,7 @@
 | 11 | Frontend library | React | ✅ (Day 2) |
 | 12 | Frontend tooling | Vite | ✅ (Day 2) |
 | 13 | AI provider | Groq API (free tier, OpenAI-compatible), behind an AiService interface | ✅ |
-| 14 | PDF text extraction | Apache PDFBox | 🔜 |
+| 14 | PDF text extraction | Apache PDFBox 3.0.7 | ✅ |
 | 15 | Chat-with-PDF approach | Chunking + retrieval (RAG) | 🔜 |
 | 16 | Secrets handling | Environment variables | 🔜 |
 | 17 | Frontend styling | Tailwind CSS or similar | ❓ |
@@ -111,6 +111,15 @@
 | 77 | Delete order | Database row first, then the file | ✅ |
 | 78 | Upload progress in React | `XMLHttpRequest` for uploads, `fetch` for everything else | ✅ |
 | 79 | Checks in the browser | Quick validation for user experience, the server decides | ✅ |
+| 80 | Error responses | No stack traces, exception names or messages in error bodies (explicit settings) | ✅ |
+| 81 | When the PDF is read | During the upload request (max 5 MB and 200 pages) | ✅ |
+| 82 | Order of upload checks | First bytes, then parse, then disk, then database | ✅ |
+| 83 | Unreadable, locked or too long PDFs | HTTP 422 with no details, and a 200-page cap | ✅ |
+| 84 | PDFs with no text | Accepted as NO_TEXT, OCR is a future improvement | ✅ |
+| 85 | Where the full text lives | Own table `document_texts` (LONGTEXT, lazy), 300-character preview on the document | ✅ |
+| 86 | Status column type | VARCHAR through `@JdbcTypeCode`, not a MySQL enum | ✅ |
+| 87 | Showing document status | Badge, page count and preview, an unknown status is shown as it is | ✅ |
+| 88 | Browser end-to-end tests | Playwright, 5 flows, run by hand against the running app | ✅ |
 
 ---
 
@@ -239,15 +248,18 @@
 - **Trade-offs:** Free tiers have rate limits, quality differs by model, and prompts may be handled under the provider's free-tier data terms, so I will not send private documents until I have read them.
 - **Other free options considered:** Google Gemini, OpenRouter free models, Mistral free mode, and local Ollama.
 
-### 3.15 Apache PDFBox 🔜
-- **What:** Java library to read text out of PDF files.
-- **Why we chose it:** Free (Apache 2.0 license), pure Java, easy to add as a dependency.
+### 3.15 Apache PDFBox ✅
+- **What:** Java library that opens a PDF and reads its text and page count. We use `Loader.loadPDF(bytes)` and `PDFTextStripper` (PDFBox 3.0.7).
+- **Why we chose it:** Free (Apache 2.0 license), pure Java, one dependency. It can also build PDFs, so our tests create real PDFs instead of depending on files lying around.
 - **Alternatives:** Apache Tika, iText, sending the PDF directly to an AI model that accepts files, OCR (Tesseract).
 - **Why not those:**
   - *iText:* Powerful, but its open-source license (AGPL) has restrictions that matter for commercial use.
   - *Tika:* Handles many file types, which is nice later (DOCX), but is heavier than we need for PDFs.
   - *Direct PDF to AI:* Possible with some providers, but extracting text ourselves lets us store it, chunk it, and control cost.
-  - *OCR:* Needed only for scanned PDFs. We'll mention it as a future improvement.
+  - *OCR:* Needed only for scanned PDFs. Planned as a future improvement (see 3.84).
+- **How we use it safely:** A PDF from a stranger is untrusted input. We check the first bytes first (3.73), cap the pages at 200, open it with try-with-resources, and turn every library failure into a clean 422 (3.83).
+- **Limits today:** No OCR, so scans have no text. The order of text in complex layouts (columns, tables) can be imperfect. A tricky file could still use a lot of memory, and the 5 MB and 200-page caps reduce that.
+- **Interview line:** "PDFBox reads the text on the server. I treat the PDF as untrusted input: a type check, a page cap, and every parser failure becomes a clean 422."
 
 ### 3.16 Chat with PDF: chunking + retrieval (RAG) 🔜
 - **What:** Split the PDF text into chunks, find the chunks relevant to the question, and send only those to the AI with the question.
@@ -432,18 +444,22 @@
 - **Deleting a chat** uses `window.confirm` and cannot be undone.
 - **Streaming:** the Markdown of the whole reply is re-parsed for every piece (fine at these sizes). An interrupted reply is discarded, not resumed, and there are no reconnects.
 - **No syntax highlighting** in code blocks, and Copy copies Markdown, not rich text.
-- **No React component or browser end-to-end tests yet** (the screens are tested by hand).
+- **Browser end-to-end tests cover only the documents page** (5 Playwright flows). The chat screen has none, and they need both servers running by hand.
 - **No continuous integration:** tests run only on my computer for now.
-- **The integration tests use H2, not MySQL,** and the real Groq call is never tested automatically (it needs a key and costs quota).
+- **The integration tests use H2, not MySQL,** and the real Groq call is never tested automatically (it needs a key and costs quota).  On Day 16 this hid a too-small text column that only real MySQL showed. Live checks with curl found it.
 - **The open chat is not in the URL (no `/chat/12`),** so there are no per-chat links or Back-button history.
 - **Not tested on real phones or with a screen reader.**
 - **The chat screen itself (streaming, sidebar actions)** has no automated component tests yet.
 - **Static hosting needs** a "send every path to index.html" rule.
-- **Uploads are only checked by their first bytes** (`%PDF-`). A broken or malicious file can still start that way. Apache PDFBox will really parse it on Day 16.
 - **No per-user storage quota or upload rate limit.** One user could fill the disk. Planned with rate limiting (Day 30).
 - **Files live on the local disk,** which does not survive a container restart or several servers without a mounted volume. Revisit with Docker and deployment.
 - **No antivirus scan** and **no download endpoint** yet. A failed file delete can leave an unused file on disk (harmless, but never cleaned up).
 - **Delete uses `window.confirm`** for documents too (real modal planned for Day 35).
+- **PDFs are read fully in memory** during the upload (at most 5 MB and 200 pages). Many parallel uploads could use a lot of memory, and heavy files would move to a background job.
+- **Text order from complex PDFs** (columns, tables) can be imperfect, and there is **no OCR**, so scans show "No text found".
+- **The extracted text is stored but nothing uses it yet.** It is for chat with a PDF.
+- **Schema changes use `ddl-auto=update`,** which never changes an existing column. On Day 16 one column needed a manual `ALTER TABLE` (planned fix: Flyway migrations).
+- **The robot tests leave `e2e-...@example.com` users** in the development database.
 
 ### 3.37 JWT with Spring's built-in resource server ✅
 - **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
@@ -637,6 +653,7 @@
 - **Alternatives:** The development MySQL, Testcontainers with a real MySQL, mocking the repositories everywhere.
 - **Why not those:** The development database makes tests depend on my machine and my data. Mocking repositories everywhere would never test the real SQL and constraints. Testcontainers is the most realistic option but needs Docker.
 - **Trade-off:** H2 is not MySQL, so rare SQL differences can hide. Planned: Testcontainers MySQL when we add CI.
+- **Day 16 evidence:** The H2 tests passed while MySQL refused a long text (`Data too long for column 'content'`). This is the gap Testcontainers would close.
 
 ### 3.62 Integration tests over real HTTP, not MockMvc ✅
 - **What:** `ApiIntegrationTest` starts the whole application on a random port and calls it with the JDK `HttpClient`.
@@ -717,7 +734,7 @@
 - **Why we chose it:** Both the name and the Content-Type are chosen by the sender. A text file named `a.pdf` would pass a name check.
 - **Alternatives:** Check the extension, trust the Content-Type, fully parse the PDF now, use Apache Tika to detect the type.
 - **Why not those:** Extension and Content-Type are claims. Full parsing is Day 16 (PDFBox will reject a broken file). Tika is heavier than needed for one type.
-- **Limit:** A file can start with `%PDF-` and still be broken or malicious. This is a cheap first gate, not a full guarantee.
+- **Limit:** A file can start with `%PDF-` and still be broken or malicious. This is a cheap first gate. Since Day 16 the second gate really parses the file (3.82 and 3.83).
 - **Interview line:** "I do not trust names or headers from the client. I check the real bytes, and I know that is only the first gate."
 
 ### 3.74 Storing files on local disk with random names ✅
@@ -762,6 +779,75 @@
 - **What:** React checks name, emptiness and size before sending. The server checks everything again.
 - **Why:** It gives an instant message and saves bandwidth. It can be bypassed with curl, so it protects nothing.
 - **Interview line:** "Frontend validation is for user experience, backend validation is for security." (same as 3.33)
+
+### 3.80 Error responses reveal nothing about the server ✅
+- **What:** `spring.web.error.include-stacktrace=never`, `spring.web.error.include-exception=false` and `spring.web.error.include-message=never`. An error body now holds only the time, status, error name and path. The browser writes its own friendly text from the status code (`friendlyMessage`).
+- **Why we chose it:** Spring DevTools switches stack traces on in development, and on Day 16 a 500 reply showed the raw SQL statement in its `message` field. Both tell a stranger how the server and the database are built.
+- **Alternatives:** Rely on DevTools being absent in production, or a custom error format (RFC 7807 problem details) with safe messages.
+- **Why not those:** A safety rule that only works by accident is fragile. Problem details are nicer for a public API, but more work than this project needs now.
+- **Trade-off:** The server's own texts (like "Only PDF files are accepted") never reach the screen, so every status code needs a message in the frontend.
+- **Interview line:** "Errors tell the client what went wrong, never how the server is built. I switched the details off explicitly instead of trusting a dev tool to be absent in production."
+
+### 3.81 The PDF is read during the upload ✅
+- **What:** PDFBox runs inside the upload request. The reply already contains the status, the page count and the preview.
+- **Why we chose it:** Files are limited to 5 MB and 200 pages, so reading takes well under a second. There is no queue and no waiting state, and it is easy to test.
+- **Alternatives:** A background job with a PROCESSING status, or extracting the text lazily the first time it is needed.
+- **Why not those:** A queue needs states, retries, polling and failure handling, which is worth it for big files or OCR. Lazy extraction would make the first chat slow and hide a broken file until much later.
+- **Trade-off:** A slow or heavy file holds a request thread while it is read. Revisit if we add OCR or raise the limits.
+- **Interview line:** "I extract synchronously because the files are small and capped. With bigger files or OCR I would move it to a background job with a processing status."
+
+### 3.82 Order of checks: bytes, parse, disk, database ✅
+- **What:** (1) the first bytes must be `%PDF-` (415), (2) PDFBox must be able to read it (422), (3) the bytes are written under a random name, (4) the database rows are saved. If the database save fails, the file is deleted again.
+- **Why we chose it:** A bad file is refused before it touches the disk, so there is nothing to clean up. The cheap check runs before the expensive one.
+- **Alternatives:** Save first and delete on failure (the Day 15 order), or parse from the saved file.
+- **Why not those:** They write strangers' bad files to disk for no reason and need cleanup in more places. Reading a file of at most 5 MB into memory is fine.
+- **Interview line:** "Cheap check first, expensive check second, and nothing reaches the disk until the file is known to be readable."
+
+### 3.83 Unreadable, locked or too long PDFs give 422 ✅
+- **What:** A damaged, password-protected or over-200-page PDF returns 422 (Unprocessable Content) and no details. One catch at the library boundary turns `IOException` and `RuntimeException` into the same answer.
+- **Why we chose it:** The file has the right type (so not 415), but the server cannot process it (and the server itself is fine, so not 500). A PDF is controlled by the sender and the parser can fail in many ways, so we catch broadly at this one boundary. The page cap stops "small file, thousands of pages" abuse.
+- **Alternatives:** 400, 415, or letting the 500 happen, and a separate message for each cause.
+- **Why not those:** A 500 means "our bug" and would hide real bugs. The browser message already names all three reasons, so separate server messages add little.
+- **Trade-off:** Catching `RuntimeException` broadly could hide a real bug inside the extractor. The unit tests cover the known cases.
+- **Interview line:** "Anything the parser cannot handle becomes one clean 422, with no details and no stack trace, so a hostile file reveals nothing."
+
+### 3.84 PDFs without text are accepted as NO_TEXT ✅
+- **What:** A valid PDF with no text layer (a scan, or only images) is saved with the status `NO_TEXT`, no text row and no preview. The UI explains it.
+- **Why we chose it:** Rejecting a perfectly valid file would confuse people. Keeping it lets us add OCR later without asking for a new upload.
+- **Alternatives:** Reject it with 422, run OCR now (Tesseract), or store it as READY with empty text.
+- **Why not those:** Rejecting hides the reason. OCR is a big feature (a native tool, slow, heavy). An empty READY would make chat fail silently.
+- **Interview line:** "A scan is a normal case, not an error, so it gets its own status, and OCR is a planned improvement."
+
+### 3.85 Full text in its own table, preview on the document ✅
+- **What:** `document_texts` (a `LONGTEXT` column, linked lazily, removed together with its document by cascade) holds the full text. `documents.preview` holds the first 300 characters. Listing documents never loads the full texts.
+- **Why we chose it:** A 200-page PDF can have hundreds of thousands of characters, while a list needs only a short preview. A lazy link on the owning side stays lazy without bytecode tricks.
+- **Alternatives:** One `text` column on `documents`, computing the preview on the fly, or storing the text as a file next to the PDF.
+- **Why not those:** A text column on `documents` is loaded by every list query (a lazy basic column is silently eager without bytecode enhancement). Computing the preview needs the whole text. Files on disk are harder to query and to keep consistent with the database.
+- **Trade-off:** One more table and one more join when the text is really needed.
+- **Interview line:** "I split the heavy data into its own table, so listing stays cheap."
+
+### 3.86 Status stored as text, not as a database enum ✅
+- **What:** `@Enumerated(EnumType.STRING)` plus `@JdbcTypeCode(SqlTypes.VARCHAR)`, so the column is `VARCHAR(20)`.
+- **Why we chose it:** Hibernate can create a native MySQL `enum(...)` column, and `ddl-auto=update` never changes an existing column, so adding a new status would fail with "Data truncated".
+- **Alternatives:** A native enum with a manual `ALTER TABLE` every time, a number (the enum position), or a lookup table.
+- **Why not those:** A manual step is easy to forget. Positions break when someone reorders the enum. A lookup table is more than we need.
+- **Trade-off:** The database does not check the allowed values (the Java enum does).
+- **Interview line:** "I store statuses as strings in a varchar, so adding one needs no schema change. Positions are fragile."
+
+### 3.87 Showing status, pages and a preview ✅
+- **What:** The Documents page shows a coloured badge (Text ready, No text found, Not read yet), the page count and a two-line preview. `describeStatus` maps the status words to labels and shows a status it does not know as it is.
+- **Why we chose it:** People should see at once whether DocMind can use a file, and why not.
+- **Alternatives:** Show raw status words, hide NO_TEXT files, or show the full text.
+- **Why not those:** Raw words are unfriendly, hiding loses the explanation, and the full text is heavy and not needed on a list.
+- **Interview line:** "The UI never assumes it knows every status. An unknown value degrades gracefully instead of breaking the page."
+
+### 3.88 End-to-end tests with Playwright ✅
+- **What:** 5 robot tests in `frontend/e2e` open a real Chrome window against the running backend and frontend. They register a user, upload a text PDF, a blank PDF, a fake PDF, a broken PDF and a file over 5 MB, refresh, and delete. The files end in `.e2e.js`, so Vitest ignores them.
+- **Why we chose it:** They test every layer together in a real browser: the real server, the real database and the real upload. Unit and component tests cannot do that.
+- **Alternatives:** Manual checks only, Cypress, Selenium, or a mocked backend.
+- **Why not those:** Manual checks do not repeat. Cypress and Selenium also work, but Playwright waits for the page by itself and downloads its own browser. A mocked backend would miss integration bugs like the Day 16 text column.
+- **Trade-offs:** They are slower, need both servers running, and create test users (`e2e-...@example.com`) in the development database. We write only a few, for the main flows.
+- **Interview line:** "Many fast unit tests, integration tests over real HTTP, and a handful of browser tests for the main flows."
 
 ---
 
@@ -869,6 +955,18 @@ A: Large binary data makes the database and its backups heavy. I keep metadata i
 **Q: Why use XMLHttpRequest in a modern React app?**
 A: Only for uploads, because fetch cannot report upload progress. Everything else uses fetch through one helper.
 
+**Q: How do you handle PDFs you cannot trust?**
+A: Several gates in order: a size limit, a check of the first bytes, then really parsing the file with PDFBox with a page cap. Anything unreadable becomes a clean 422 with no details, and a bad file never reaches the disk.
+
+**Q: What happens with a scanned PDF?**
+A: It is valid but has no text layer, so it is stored with the status NO_TEXT and the screen explains it. OCR would be the next step, and the stored file means nobody has to upload it again.
+
+**Q: Why is the full text in its own table?**
+A: The list screen only needs a short preview. A separate lazy table keeps big texts out of every list query, and deleting the document removes its text by cascade.
+
+**Q: Tests passed but a bug still reached the running app. What happened?**
+A: The tests use H2, and real MySQL created a text column that was too small. Manual checks with curl and the browser found it. I fixed the column, and learned why both kinds of checks are needed. A MySQL test container would close the gap.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -920,6 +1018,11 @@ A: Only for uploads, because fetch cannot report upload progress. Everything els
 | 15 | `Could not resolve placeholder 'app.storage.dir'` at startup or in tests | The property was missing from `application.properties` or `application-test.properties` | Added `app.storage.dir` to both files |
 | 15 | A real-looking upload returned 415 | The test file did not start with `%PDF-` | Used a real PDF (the server checks the first bytes, not the name) |
 | 15 | The Documents link looked underlined | A `Link` is an `<a>` tag, and `.new-chat` was written for a button | Added `text-decoration: none` to `.new-chat` |
+| 16 | HTTP 500 `Data too long for column 'content'` when uploading a text PDF | `@Lob` created a short text column in MySQL. The H2 tests use another column type and could not show it | Set `columnDefinition = "LONGTEXT"` and ran `ALTER TABLE document_texts MODIFY COLUMN content LONGTEXT NOT NULL`, because `ddl-auto=update` never changes an existing column |
+| 16 | The 500 reply contained the raw SQL statement | Spring puts the exception message into the error body by default | Set `spring.web.error.include-message=never` |
+| 16 | Test `doesNotContain("\r")` failed | PDFBox still used Windows line endings in the extracted text | Replaced `\r\n` and `\r` with `\n` at the end of `extract` |
+| 16 | `curl: (26) Failed to open/read local data from file` | The test PDFs were not where the command looked, because Chrome's "Save as PDF" had not saved them | Checked with `Get-ChildItem` and used generated test PDFs from Downloads |
+| 16 | `401 Bearer token is malformed` from curl | `$token` was empty because I had opened a new PowerShell window | Logged in again and checked `$token.Length` before running the uploads |
 
 ---
 
@@ -957,3 +1060,4 @@ Copy this each time we add a tool:
 | 12 | Added streaming decisions (SSE, fetch reader, virtual threads, protocol, failure rules, provider stream parsing); updated known limitations |
 | 13 | Added test strategy, H2 test database, real-HTTP integration tests, mocking, Vitest, and the "tests must fail first" decisions; fixed leftover doc errors from the Day 12 review |
 | 14 | Added routing, route guard, responsive drawer, UI states, and component test decisions; settled the styling decision (3.18); updated known limitations |
+| 16 | Marked PDFBox as in use (3.15); added extraction timing, check order, 422 handling, NO_TEXT, separate text table, VARCHAR status, status badge and Playwright decisions; added error-message hiding (3.80); updated known limitations; added 4 interview questions and 5 challenges |

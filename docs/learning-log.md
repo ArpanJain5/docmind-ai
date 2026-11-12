@@ -138,3 +138,18 @@
 - Built a documents page in React with upload progress (XMLHttpRequest, because fetch cannot report upload progress)
 - Wrote 8 backend tests (wrong type, empty, too big, hostile file name, other user's document) and 15 frontend tests
 - Broke the code on purpose (removed the PDF check, removed the owner check, skipped name cleaning) and watched the right tests fail
+
+## Day 16
+- Added Apache PDFBox and read the page count and the text of every uploaded PDF
+- Learned: the first-bytes check is only a cheap first gate. The real second gate is parsing the file, and broken, password-protected or 200+ page PDFs get a clean 422
+- Learned the order of checks: cheap first, expensive second, save to disk last, so a bad file never touches the disk
+- Learned: a PDF with no text (a scan) is a normal case, not an error. It gets the status NO_TEXT, and OCR is a future improvement
+- Learned: keep heavy data (the full text) in its own table, so lists stay light and only need a 300-character preview
+- Learned: ddl-auto=update never changes an existing column, so I had to fix the text column by hand with ALTER TABLE
+- Learned: the H2 tests passed while real MySQL refused the text (the column was too small). Live checks with curl found it, so tests and live checks are both needed
+- Learned: error replies must not show stack traces, exception names or SQL (spring.web.error.include-*=never)
+- Built the Documents page: a status badge, the page count, a preview, a note for scanned PDFs and a clear message for unreadable PDFs
+- Wrote 7 backend tests (5 unit tests for the extractor, 2 API tests) and 6 frontend tests
+- Added 5 Playwright browser tests that register a user, upload a text PDF, a blank PDF, a fake PDF, a broken PDF and a too-big file, refresh, and delete
+- Used generated test PDFs instead of personal documents
+- Broke the code on purpose in several places and watched the right tests fail

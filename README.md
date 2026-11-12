@@ -16,6 +16,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - [x] Streaming AI replies with a Stop button
 - [x] Real page addresses (`/login`, `/register`, `/chat`), guarded routes, and a phone-friendly layout
 - [x] PDF upload: validated, size-limited, stored privately per user, with a documents page
+- [x] PDF upload, private to each user, with the text read on the server: page count, preview, and a status (text ready, no text found)
 
 ### Planned
 - [ ] Chat with PDF documents
@@ -32,6 +33,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 | Backend | Java 21, Spring Boot 4, Spring Security (JWT), Spring Data JPA |
 | Database | MySQL 8 |
 | AI | OpenAI-compatible LLM API (Groq free tier), behind an `AiService` interface |
+| Documents | Apache PDFBox (text extraction), files on local disk, text in MySQL |
 
 ## Architecture
 
@@ -56,7 +58,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 | `PATCH /api/conversations/{id}` | token | Rename my chat |
 | `DELETE /api/conversations/{id}` | token | Delete my chat |
 | `POST /api/chat/stream` | token | Send a message, get the reply as a stream of events |
-| POST /api/documents | token | Upload a PDF (multipart, max 5 MB) |
+| `POST /api/documents` | token | Upload a PDF (max 5 MB). Returns status, page count and preview |
 | GET /api/documents | token | List my documents |
 | DELETE /api/documents/{id} | token | Delete my document |
 
@@ -67,6 +69,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - Secrets live in a git-ignored `application-local.properties`; only a `.example` file is committed
 - AI calls have timeouts, a message length limit, and a capped history; failures return a friendly 502 and details stay in the logs
 - Uploads: size limit, file type checked by content, random file names, per-user ownership
+- Uploads are checked by their first bytes, then parsed with a page cap. Unreadable files get a clean 422, and error replies never show stack traces, SQL or exception names
 
 ## Run it locally
 
@@ -113,19 +116,18 @@ Open http://localhost:5173, create an account, and start chatting.
 
 ```powershell
 cd backend
-.\mvnw test        # 9 unit tests, 10 real-HTTP integration tests (in-memory database, fake AI)
+.\mvnw test        # 35 tests: unit tests, PDF extractor tests, real-HTTP integration tests (in-memory database, fake AI)
 
 cd ..\frontend
-npm test           # 19 Vitest tests (request helper and stream reader)
-
-9 unit tests, 18 real-HTTP integration tests and 40 Vitest tests (request helper, stream reader, upload, documents page, route guards)
+npm test           # 46 Vitest tests (request helper, stream reader, upload, documents page, routes)
+npm run e2e        # 5 Playwright browser tests (needs the backend and the frontend running)
 ```
 
 ## Project structure
 
 ```
 backend/   Spring Boot API (ai, config, controller, dto, model, repository, service)
-frontend/  React app (api helpers, auth context, pages)
+frontend/  React app (api helpers, auth context, pages) and e2e/ (Playwright tests)
 docs/      learning-log.md and tech-decisions.md
 ```
 
@@ -148,8 +150,9 @@ docs/      learning-log.md and tech-decisions.md
 | 12 | Streaming replies (Server-Sent Events) with a Stop button | ✅ |
 | 13 | Automated tests (unit, real-HTTP integration, frontend) | ✅ |
 | 14 | React Router, route guards, phone drawer, loading/error/empty states | ✅ |
-| 15 | PDF upload | ✅ 
-| 16 | Extract text from PDFs | 🔜 Next |
+| 15 | PDF upload with checks, private storage and a documents page | ✅ |
+| 16 | Read the text of PDFs (PDFBox), status, page count, preview, browser tests | ✅ |
+| 17 | Chat with a PDF | 🔜 Next |
 
 ## Roadmap
 Chat polish and tests, then PDF upload and chat with PDF, summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.
