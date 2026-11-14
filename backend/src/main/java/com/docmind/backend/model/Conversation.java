@@ -34,11 +34,27 @@ public class Conversation {
     @Column(nullable = false, length = 120)
     private String title;
 
+    // The document this chat is about (null for an ordinary chat).
+    // It becomes null again if the document is deleted.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "document_id")
+    private Document document;
+
+    // The same column, read-only: gives us the id without loading the document
+    @Column(name = "document_id", insertable = false, updatable = false)
+    private Long documentId;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 
     public Conversation(User user, String title) {
+        this(user, title, null);
+    }
+
+    public Conversation(User user, String title, Document document) {
         this.user = user;
         this.title = title;
+        this.document = document;
+        this.documentId = (document == null) ? null : document.getId();
     }
 }

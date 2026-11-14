@@ -7,6 +7,7 @@ import com.docmind.backend.model.DocumentText;
 import com.docmind.backend.model.User;
 import com.docmind.backend.repository.DocumentRepository;
 import com.docmind.backend.repository.UserRepository;
+import com.docmind.backend.repository.ConversationRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,17 +26,20 @@ public class DocumentService {
 
     private final DocumentRepository documentRepository;
     private final UserRepository userRepository;
+    private final ConversationRepository conversationRepository;
     private final FileStorageService storage;
     private final PdfTextExtractor extractor;
 
     public DocumentService(DocumentRepository documentRepository,
-                           UserRepository userRepository,
-                           FileStorageService storage,
-                           PdfTextExtractor extractor) {
-        this.documentRepository = documentRepository;
-        this.userRepository = userRepository;
-        this.storage = storage;
-        this.extractor = extractor;
+                        UserRepository userRepository,
+                        ConversationRepository conversationRepository,
+                        FileStorageService storage,
+                        PdfTextExtractor extractor) {
+    this.documentRepository = documentRepository;
+    this.userRepository = userRepository;
+    this.conversationRepository = conversationRepository;
+    this.storage = storage;
+    this.extractor = extractor;
     }
 
     public DocumentResponse upload(Long userId, MultipartFile file) {
@@ -69,6 +73,7 @@ public class DocumentService {
 
     public void delete(Long userId, Long documentId) {
         Document document = findOwned(userId, documentId); // 404 unless it is YOURS
+        conversationRepository.detachDocument(document.getId()); // chats about it become ordinary chats
         documentRepository.delete(document);               // row first (the text goes with it)...
         storage.delete(document.getStoredFilename());      // ...then the file
     }
@@ -108,6 +113,7 @@ public class DocumentService {
         Document document = new Document(user, cleanName(file.getOriginalFilename()),
                 storedName, file.getSize());
         document.setPageCount(extracted.pageCount());
+        document.setCharCount(extracted.text().length());
 
         if (extracted.text().isBlank()) {
             document.setStatus(DocumentStatus.NO_TEXT); // a valid PDF, but nothing to read (a scan)

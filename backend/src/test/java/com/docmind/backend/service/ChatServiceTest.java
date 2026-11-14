@@ -11,6 +11,9 @@ import com.docmind.backend.model.User;
 import com.docmind.backend.repository.ConversationRepository;
 import com.docmind.backend.repository.MessageRepository;
 import com.docmind.backend.repository.UserRepository;
+import com.docmind.backend.model.Document;
+import com.docmind.backend.model.DocumentStatus;
+import com.docmind.backend.repository.DocumentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,6 +60,8 @@ class ChatServiceTest {
     private UserRepository userRepository;
     @Mock
     private AiService aiService;
+    @Mock
+    private DocumentRepository documentRepository;
 
     private ChatService chatService;
 
@@ -67,7 +72,8 @@ class ChatServiceTest {
     @BeforeEach
     void setUp() {
         chatService = new ChatService(
-                conversationRepository, messageRepository, userRepository, aiService);
+            conversationRepository, messageRepository, userRepository,
+            documentRepository, aiService, 12_000);
 
         User user = new User("a@example.com", "hash", "Arpan");
         user.setId(USER_ID);
@@ -243,5 +249,89 @@ class ChatServiceTest {
         verify(messageRepository).deleteById(100L);
         verify(conversationRepository).deleteById(NEW_CONVERSATION_ID);
         assertThat(savedMessages).extracting(Message::getRole).containsExactly(Role.USER);
+    }
+
+        // ---------- chatting about a document ----------
+
+    private Document readableDocument(long id) {
+        Document document = new Document(null, "report.pdf", "stored.pdf", 10);
+        document.setId(id);
+        document.setStatus(DocumentStatus.READY);
+        return document;
+    }
+
+    @Test
+    void aNewChatAboutADocumentSendsTheDocumentTextToTheAi() {
+        when(documentRepository.findByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of(readableDocument(3L)));
+        when(documentRepository.findTextByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of("The sky is green."));
+
+        chatService.chat(USER_ID, null, 3L, "What colour is the sky?");
+
+        ArgumentCaptor<Conversation> saved = ArgumentCaptor.forClass(Conversation.class);
+        verify(conversationRepository).save(saved.capture());
+        assertThat(saved.getValue().getDocumentId()).isEqualTo(3L);
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(aiService).complete(prompt.capture(), anyList());
+        assertThat(prompt.getValue()).contains("<document>").contains("The sky is green.");
+    }
+
+    @Test
+    void aChatThatAlreadyHasADocumentKeepsSendingIt() {
+        Conversation existing = new Conversation(null, "About a document", readableDocument(3L));
+        existing.setId(9L);
+        when(conversationRepository.findByIdAndUserId(9L, USER_ID)).thenReturn(Optional.of(existing));
+        when(documentRepository.findTextByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of("The sky is green."));
+
+        chatService.chat(USER_ID, 9L, "And the grass?");
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(aiService).complete(prompt.capture(), anyList());
+        assertThat(prompt.getValue()).contains("The sky is green.");
+    }
+
+    @Test
+    void aChatWhoseDocumentWasDeletedIsAnOrdinaryChatAgain() {
+        Conversation existing = new Conversation(null, "Old chat"); // no document
+        existing.setId(9L);
+        when(conversationRepository.findByIdAndUserId(9L, USER_ID)).thenReturn(Optional.of(existing));
+
+        chatService.chat(USER_ID, 9L, "Hello");
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(aiService).complete(prompt.capture(), anyList());
+        assertThat(prompt.getValue()).doesNotContain("<document>");
+        verify(documentRepository, never()).findTextByIdAndUserId(anyLong(), anyLong());
+    }
+
+    @Test
+    void anotherPersonsDocumentIsNotFoundAndNothingIsSaved() {
+        when(documentRepository.findByIdAndUserId(3L, USER_ID)).thenReturn(Optional.empty());
+
+        Throwable error = catchThrowable(() -> chatService.chat(USER_ID, null, 3L, "Hello"));
+
+        assertThat(statusOf(error)).isEqualTo(404);
+        verify(conversationRepository, never()).save(any(Conversation.class));
+        verify(messageRepository, never()).save(any(Message.class));
+    }
+
+    @Test
+    void aDocumentWithoutTextCannotBeAttached() {
+        Document scan = readableDocument(4L);
+        scan.setStatus(DocumentStatus.NO_TEXT);
+        when(documentRepository.findByIdAndUserId(4L, USER_ID)).thenReturn(Optional.of(scan));
+
+        Throwable error = catchThrowable(() -> chatService.chat(USER_ID, null, 4L, "Hello"));
+
+        assertThat(statusOf(error)).isEqualTo(400);
+        verify(conversationRepository, never()).save(any(Conversation.class));
+    }
+
+    @Test
+    void aDocumentCanOnlyBeChosenWhenStartingANewChat() {
+        Throwable error = catchThrowable(() -> chatService.chat(USER_ID, 9L, 3L, "Hello"));
+
+        assertThat(statusOf(error)).isEqualTo(400);
+        verify(messageRepository, never()).save(any(Message.class));
     }
 }

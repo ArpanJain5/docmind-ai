@@ -51,7 +51,7 @@ public class ChatController {
     public ChatResponse chat(@AuthenticationPrincipal Jwt jwt, @RequestBody ChatRequest request) {
         String message = requireValidMessage(request);
         Long userId = Long.valueOf(jwt.getSubject());
-        return chatService.chat(userId, request.conversationId(), message);
+        return chatService.chat(userId, request.conversationId(), request.documentId(), message);
     }
 
     // The reply piece by piece, as Server-Sent Events
@@ -61,7 +61,7 @@ public class ChatController {
         Long userId = Long.valueOf(jwt.getSubject());
 
         // Checked BEFORE streaming starts, so a stranger's chat id gets a real 404
-        chatService.verifyAccess(userId, request.conversationId());
+        chatService.verifyAccess(userId, request.conversationId(), request.documentId());
 
         SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT_MS);
         emitter.onTimeout(emitter::complete);
@@ -69,9 +69,9 @@ public class ChatController {
         // The user id was read above, because the background thread has no login information
         streamExecutor.execute(() -> {
             try {
-                chatService.chatStreaming(userId, request.conversationId(), message,
-                        id -> send(emitter, "meta", Map.of("conversationId", id)),
-                        piece -> send(emitter, "token", Map.of("text", piece)));
+                chatService.chatStreaming(userId, request.conversationId(), request.documentId(), message,
+                    id -> send(emitter, "meta", Map.of("conversationId", id)),
+                    piece -> send(emitter, "token", Map.of("text", piece)));
                 send(emitter, "done", Map.of());
             } catch (Exception e) {
                 log.warn("Streaming chat failed: {}", e.getMessage());

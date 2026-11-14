@@ -7,12 +7,16 @@ import com.docmind.backend.dto.ChatResponse;
 import com.docmind.backend.dto.ConversationSummary;
 import com.docmind.backend.dto.MessageResponse;
 import com.docmind.backend.model.Conversation;
+import com.docmind.backend.model.Document;
+import com.docmind.backend.model.DocumentStatus;
 import com.docmind.backend.model.Message;
 import com.docmind.backend.model.Role;
 import com.docmind.backend.model.User;
 import com.docmind.backend.repository.ConversationRepository;
+import com.docmind.backend.repository.DocumentRepository;
 import com.docmind.backend.repository.MessageRepository;
 import com.docmind.backend.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,54 +39,77 @@ public class ChatService {
     private final ConversationRepository conversationRepository;
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
+    private final DocumentRepository documentRepository;
     private final AiService aiService;
+
+    // How much of a document the AI sees with each question
+    private final int maxDocumentChars;
 
     public ChatService(ConversationRepository conversationRepository,
                        MessageRepository messageRepository,
                        UserRepository userRepository,
-                       AiService aiService) {
+                       DocumentRepository documentRepository,
+                       AiService aiService,
+                       @Value("${app.ai.max-document-chars:12000}") int maxDocumentChars) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
+        this.documentRepository = documentRepository;
         this.aiService = aiService;
+        this.maxDocumentChars = maxDocumentChars;
     }
 
     // ---------- chatting ----------
 
-    // The whole reply at once
+    // The whole reply at once (an ordinary chat)
     public ChatResponse chat(Long userId, Long conversationId, String userMessage) {
-        return converse(userId, conversationId, userMessage,
+        return chat(userId, conversationId, null, userMessage);
+    }
+
+    // The whole reply at once. documentId is only allowed when a NEW chat starts.
+    public ChatResponse chat(Long userId, Long conversationId, Long documentId, String userMessage) {
+        return converse(userId, conversationId, documentId, userMessage,
                 id -> { },
-                history -> aiService.complete(SYSTEM_PROMPT, history));
+                (prompt, history) -> aiService.complete(prompt, history));
+    }
+
+    // The reply piece by piece (an ordinary chat)
+    public ChatResponse chatStreaming(Long userId, Long conversationId, String userMessage,
+                                      Consumer<Long> onConversation, Consumer<String> onToken) {
+        return chatStreaming(userId, conversationId, null, userMessage, onConversation, onToken);
     }
 
     // The reply piece by piece: onConversation gets the chat id first, then onToken gets each piece
-    public ChatResponse chatStreaming(Long userId, Long conversationId, String userMessage,
+    public ChatResponse chatStreaming(Long userId, Long conversationId, Long documentId, String userMessage,
                                       Consumer<Long> onConversation, Consumer<String> onToken) {
-        return converse(userId, conversationId, userMessage,
+        return converse(userId, conversationId, documentId, userMessage,
                 onConversation,
-                history -> aiService.stream(SYSTEM_PROMPT, history, onToken));
+                (prompt, history) -> aiService.stream(prompt, history, onToken));
     }
 
-    // Lets the controller return a real 404 BEFORE a stream starts
-    public void verifyAccess(Long userId, Long conversationId) {
+    // Lets the controller return a real 404 or 400 BEFORE a stream starts
+    public void verifyAccess(Long userId, Long conversationId, Long documentId) {
         if (conversationId != null) {
             findOwnedConversation(userId, conversationId);
         }
+        resolveDocument(userId, conversationId, documentId);
     }
 
     @FunctionalInterface
     private interface AiCall {
-        String run(List<AiMessage> history);
+        String run(String systemPrompt, List<AiMessage> history);
     }
 
-    private ChatResponse converse(Long userId, Long conversationId, String userMessage,
+    private ChatResponse converse(Long userId, Long conversationId, Long documentId, String userMessage,
                                   Consumer<Long> onConversation, AiCall aiCall) {
         boolean isNewChat = (conversationId == null);
 
+        // Checked first, so a bad document id saves nothing at all
+        Document document = resolveDocument(userId, conversationId, documentId);
+
         Conversation conversation = isNewChat
                 ? conversationRepository.save(
-                        new Conversation(findUser(userId), makeTitle(userMessage)))
+                        new Conversation(findUser(userId), makeTitle(userMessage), document))
                 : findOwnedConversation(userId, conversationId);
 
         Message savedUserMessage =
@@ -92,7 +119,8 @@ public class ChatService {
         String reply;
         try {
             onConversation.accept(conversation.getId());
-            reply = callAi(conversation.getId(), aiCall);
+            String systemPrompt = buildSystemPrompt(userId, conversation);
+            reply = callAi(conversation.getId(), systemPrompt, aiCall);
         } catch (RuntimeException e) {
             // The AI failed, or the browser stopped listening: undo what we saved
             messageRepository.deleteById(savedUserMessage.getId());
@@ -107,7 +135,40 @@ public class ChatService {
         return new ChatResponse(conversation.getId(), reply);
     }
 
-    private String callAi(Long conversationId, AiCall aiCall) {
+    // The document for a NEW chat, or null for an ordinary chat
+    private Document resolveDocument(Long userId, Long conversationId, Long documentId) {
+        if (documentId == null) {
+            return null;
+        }
+        if (conversationId != null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Choose the document when you start a new chat");
+        }
+
+        // Only YOUR documents (404 for anyone else's), same rule as for chats
+        Document document = documentRepository.findByIdAndUserId(documentId, userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Document not found"));
+
+        if (document.getStatus() != DocumentStatus.READY) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "This document has no readable text");
+        }
+        return document;
+    }
+
+    // The instructions for the AI. For a chat about a document they include the (cut) text.
+    private String buildSystemPrompt(Long userId, Conversation conversation) {
+        Long documentId = conversation.getDocumentId();
+        if (documentId == null) {
+            return SYSTEM_PROMPT;
+        }
+        return documentRepository.findTextByIdAndUserId(documentId, userId)
+                .map(text -> PromptBuilder.withDocument(SYSTEM_PROMPT, text, maxDocumentChars))
+                .orElse(SYSTEM_PROMPT);
+    }
+
+    private String callAi(Long conversationId, String systemPrompt, AiCall aiCall) {
         List<Message> all = messageRepository.findByConversationIdOrderByIdAsc(conversationId);
         List<Message> recent = all.subList(Math.max(0, all.size() - MAX_HISTORY_MESSAGES), all.size());
         List<AiMessage> history = recent.stream()
@@ -115,7 +176,7 @@ public class ChatService {
                 .toList();
 
         try {
-            return aiCall.run(history);
+            return aiCall.run(systemPrompt, history);
         } catch (AiException e) {
             // 502 = "the service behind me failed". The details stay in our logs.
             throw new ResponseStatusException(
@@ -128,7 +189,7 @@ public class ChatService {
     public List<ConversationSummary> listConversations(Long userId) {
         return conversationRepository.findByUserIdOrderByIdDesc(userId)
                 .stream()
-                .map(ConversationSummary::from)
+                .map(c -> ConversationSummary.from(c, maxDocumentChars))
                 .toList();
     }
 
@@ -152,7 +213,7 @@ public class ChatService {
     public ConversationSummary renameConversation(Long userId, Long conversationId, String title) {
         Conversation conversation = findOwnedConversation(userId, conversationId);
         conversation.setTitle(title.strip());
-        return ConversationSummary.from(conversation);
+        return ConversationSummary.from(conversation, maxDocumentChars);
     }
 
     // ---------- helpers ----------

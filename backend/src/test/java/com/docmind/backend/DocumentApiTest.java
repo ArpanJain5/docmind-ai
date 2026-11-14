@@ -33,6 +33,7 @@ class DocumentApiTest {
 
     private static final String PASSWORD = "CorrectHorse123";
     private static final byte[] TINY_PDF = TestPdfs.withText("Hello DocMind");
+    private static final byte[] SECRET_PDF = TestPdfs.withText("The secret code is PINEAPPLE-42");
 
     @Value("${local.server.port}")
     private int port;
@@ -251,6 +252,94 @@ class DocumentApiTest {
                 .newBuilder(URI.create("http://localhost:" + port + path))
                 .timeout(Duration.ofSeconds(30))
                 .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+        // ---------- chatting about a document ----------
+
+    @Test
+    void aChatAboutADocumentSendsTheDocumentToTheAiAndRemembersIt() throws Exception {
+        String token = registerAndLogin();
+        long documentId = uploadAndGetId(token, "secret.pdf", SECRET_PDF);
+
+        HttpResponse<String> first = postJson("/api/chat",
+                "{\"message\":\"What is the code?\",\"documentId\":" + documentId + "}", token);
+
+        assertThat(first.statusCode()).isEqualTo(200);
+        assertThat((String) JsonPath.read(first.body(), "$.reply")).contains("PINEAPPLE-42");
+        long conversationId = ((Number) JsonPath.read(first.body(), "$.conversationId")).longValue();
+
+        String chats = send("GET", "/api/conversations", token).body();
+        assertThat(((Number) JsonPath.read(chats, "$[0].documentId")).longValue()).isEqualTo(documentId);
+        assertThat((String) JsonPath.read(chats, "$[0].documentName")).isEqualTo("secret.pdf");
+        assertThat((Boolean) JsonPath.read(chats, "$[0].documentTruncated")).isFalse();
+
+        // A follow-up question in the same chat still has the document
+        HttpResponse<String> second = postJson("/api/chat",
+                "{\"message\":\"And again?\",\"conversationId\":" + conversationId + "}", token);
+        assertThat((String) JsonPath.read(second.body(), "$.reply")).contains("PINEAPPLE-42");
+    }
+
+    @Test
+    void aChatCannotBeStartedAboutSomeoneElsesDocument() throws Exception {
+        String tokenA = registerAndLogin();
+        String tokenB = registerAndLogin();
+        long documentId = uploadAndGetId(tokenA, "private.pdf", SECRET_PDF);
+
+        HttpResponse<String> response = postJson("/api/chat",
+                "{\"message\":\"Show me\",\"documentId\":" + documentId + "}", tokenB);
+
+        assertThat(response.statusCode()).isEqualTo(404);
+        Integer chatCount = JsonPath.read(send("GET", "/api/conversations", tokenB).body(), "$.length()");
+        assertThat(chatCount).isEqualTo(0);
+    }
+
+    @Test
+    void aPdfWithoutTextCannotBeUsedForAChat() throws Exception {
+        String token = registerAndLogin();
+        long documentId = uploadAndGetId(token, "scan.pdf", TestPdfs.blank(1));
+
+        HttpResponse<String> response = postJson("/api/chat",
+                "{\"message\":\"Read it\",\"documentId\":" + documentId + "}", token);
+
+        assertThat(response.statusCode()).isEqualTo(400);
+    }
+
+    @Test
+    void deletingADocumentKeepsTheChatAsAnOrdinaryChat() throws Exception {
+        String token = registerAndLogin();
+        long documentId = uploadAndGetId(token, "secret.pdf", SECRET_PDF);
+        HttpResponse<String> first = postJson("/api/chat",
+                "{\"message\":\"What is the code?\",\"documentId\":" + documentId + "}", token);
+        long conversationId = ((Number) JsonPath.read(first.body(), "$.conversationId")).longValue();
+
+        assertThat(send("DELETE", "/api/documents/" + documentId, token).statusCode()).isEqualTo(204);
+
+        String chats = send("GET", "/api/conversations", token).body();
+        assertThat((Object) JsonPath.read(chats, "$[0].documentId")).isNull();
+
+        HttpResponse<String> second = postJson("/api/chat",
+                "{\"message\":\"Still there?\",\"conversationId\":" + conversationId + "}", token);
+        assertThat(second.statusCode()).isEqualTo(200);
+        assertThat((String) JsonPath.read(second.body(), "$.reply")).doesNotContain("Document attached");
+    }
+
+    // ---------- helpers for the tests above ----------
+
+    private long uploadAndGetId(String token, String filename, byte[] pdf) throws Exception {
+        HttpResponse<String> created = upload(token, "file", filename, pdf);
+        assertThat(created.statusCode()).isEqualTo(201);
+        return ((Number) JsonPath.read(created.body(), "$.id")).longValue();
+    }
+
+    private HttpResponse<String> postJson(String path, String json, String token) throws Exception {
+        HttpRequest request = HttpRequest
+                .newBuilder(URI.create("http://localhost:" + port + path))
+                .timeout(Duration.ofSeconds(30))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + token)
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
         return http.send(request, HttpResponse.BodyHandlers.ofString());

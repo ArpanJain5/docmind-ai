@@ -58,6 +58,9 @@ public class Document {
     // null for old Day 15 rows that were never read
     private Integer pageCount;
 
+    // How many characters of text were read (null for documents uploaded before Day 17)
+    private Integer charCount;
+
     // The first 300 characters, for showing in lists
     @Column(length = 300)
     private String preview;
