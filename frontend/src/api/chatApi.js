@@ -33,12 +33,13 @@ export function parseEvent(raw) {
 
 // The reply piece by piece. Calls onMeta(conversationId) first, then onToken(text) for each piece.
 // Resolves when the server says "done". Throws if the stream fails or is stopped.
-export async function streamMessage(message, conversationId, { onMeta, onToken }, signal) {
+// documentId is only for the FIRST message of a new chat about a document (otherwise leave it out).
+export async function streamMessage(message, conversationId, { onMeta, onToken }, signal, documentId) {
   const response = await requestStream("/chat/stream", {
-    body: { message, conversationId },
+    body: { message, conversationId, documentId: documentId ?? undefined },
     signal,
   });
-
+  
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";

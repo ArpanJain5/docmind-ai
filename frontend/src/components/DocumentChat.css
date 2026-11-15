@@ -1,0 +1,46 @@
+.docchat-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.docchat-picker label {
+  font-weight: 600;
+}
+
+.docchat-picker select {
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.docchat-hint {
+  margin: 8px 0;
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.docchat-hint a {
+  color: var(--link);
+}
+
+.docchat-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-surface);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.docchat-warning {
+  opacity: 0.9;
+}

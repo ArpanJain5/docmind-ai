@@ -7,6 +7,9 @@ import {
   renameConversation,
   streamMessage,
 } from "../api/chatApi";
+import { DOCUMENT_READ_LIMIT_CHARS, fetchDocuments } from "../api/documentsApi";
+import DocumentBanner from "../components/DocumentBanner";
+import DocumentPicker from "../components/DocumentPicker";
 import MessageBubble from "../components/MessageBubble";
 import { useAuth } from "../auth/AuthContext";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -18,6 +21,11 @@ const WELCOME = {
   text: "Hi! I'm DocMind. Ask me anything.",
   welcome: true,
 };
+const DOCUMENT_SUGGESTIONS = [
+  "Summarize this document in 5 bullet points",
+  "What are the key points?",
+  "List any dates, names or numbers mentioned",
+];
 const SUGGESTIONS = [
   "Explain how JWT authentication works",
   "Write a polite email asking for a deadline extension",
@@ -38,6 +46,8 @@ function ChatPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false); // the phone-sized drawer
   const [editingId, setEditingId] = useState(null);
   const [editingTitle, setEditingTitle] = useState("");
+  const [docs, setDocs] = useState({ status: "loading", items: [] }); // the person's documents
+  const [selectedDocId, setSelectedDocId] = useState(null); // the document for a NEW chat
   const [conversationId, setConversationId] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
     return saved ? Number(saved) : null;
@@ -51,6 +61,21 @@ function ChatPage() {
 
   const busy = loading || opening;
   const isEmptyChat = messages.length === 1 && messages[0].welcome;
+
+  // Which document is this chat about? The chat list knows (it comes from the server).
+  // Right after the first message the list is not refreshed yet, so we fall back to the choice.
+  const selectedDoc = docs.items.find((doc) => doc.id === selectedDocId) ?? null;
+  const currentChat = conversations.find((chat) => chat.id === conversationId) ?? null;
+  let attached = null;
+  if (currentChat?.documentName) {
+    attached = { name: currentChat.documentName, truncated: currentChat.documentTruncated };
+  } else if (conversationId !== null && !currentChat && selectedDoc) {
+    attached = {
+      name: selectedDoc.originalFilename,
+      truncated: selectedDoc.charCount > DOCUMENT_READ_LIMIT_CHARS,
+    };
+  }
+  const suggestions = selectedDoc ? DOCUMENT_SUGGESTIONS : SUGGESTIONS;
 
   // First load: the sidebar list, and the chat that was open last time
   useEffect(() => {
@@ -84,6 +109,21 @@ function ChatPage() {
         ]);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on first load
+  }, []);
+
+  // The person's documents, for the "chat about a document" choice
+  useEffect(() => {
+    let cancelled = false;
+    fetchDocuments()
+      .then((items) => {
+        if (!cancelled) setDocs({ status: "ready", items });
+      })
+      .catch(() => {
+        if (!cancelled) setDocs({ status: "error", items: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // If this screen disappears (for example on logout), stop any reply in progress
@@ -185,7 +225,8 @@ function ChatPage() {
             }
           },
         },
-        controller.signal
+        controller.signal,
+        isNewChat ? selectedDocId : null // the document is chosen with the FIRST message only
       );
 
       // Finished: swap the "streaming" bubble for the final one
@@ -246,6 +287,7 @@ function ChatPage() {
         return;
       }
       stickToBottom.current = true;
+      setSelectedDocId(null);
       setConversationId(id);
       localStorage.setItem(STORAGE_KEY, String(id));
       setMessages(history.length > 0 ? history : [WELCOME]);
@@ -289,6 +331,7 @@ function ChatPage() {
       await deleteConversation(chat.id);
       if (chat.id === conversationId) {
         localStorage.removeItem(STORAGE_KEY);
+        setSelectedDocId(null);
         setConversationId(null);
         setMessages([WELCOME]);
       }
@@ -302,6 +345,7 @@ function ChatPage() {
     if (busy) return;
     stickToBottom.current = true;
     localStorage.removeItem(STORAGE_KEY);
+    setSelectedDocId(null);
     setConversationId(null);
     setMessages([WELCOME]);
     setSidebarOpen(false);
@@ -372,8 +416,9 @@ function ChatPage() {
                       className={`chat-item${c.id === conversationId ? " active" : ""}`}
                       onClick={() => handleSelect(c.id)}
                       disabled={busy}
-                      title={c.title}
+                      title={c.documentName ? `${c.title} (about ${c.documentName})` : c.title}
                     >
+                      {c.documentId && <span aria-hidden="true">📄 </span>}
                       {c.title}
                     </button>
                     <button
@@ -430,6 +475,8 @@ function ChatPage() {
           </div>
         </div>
 
+        {attached && <DocumentBanner name={attached.name} truncated={attached.truncated} />}
+
         <div
           className="messages"
           ref={messagesRef}
@@ -442,9 +489,18 @@ function ChatPage() {
             <MessageBubble key={index} message={m} />
           ))}
 
+          {isEmptyChat && conversationId === null && !busy && (
+            <DocumentPicker
+              documents={docs.items}
+              status={docs.status}
+              selectedId={selectedDocId}
+              onSelect={setSelectedDocId}
+            />
+          )}
+
           {isEmptyChat && !busy && (
             <div className="suggestions">
-              {SUGGESTIONS.map((suggestion) => (
+              {suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
                   className="chip"

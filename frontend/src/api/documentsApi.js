@@ -3,6 +3,9 @@ import { ApiError, apiUrl, friendlyMessage, getToken, handleUnauthorized, reques
 // Must match spring.servlet.multipart.max-file-size on the server
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
+// How much of a document the AI reads. Must match app.ai.max-document-chars on the server.
+export const DOCUMENT_READ_LIMIT_CHARS = 12000;
+
 // A quick check in the browser so people get an instant answer.
 // The server checks again, because this one can be skipped by anyone.
 export function validateFile(file) {

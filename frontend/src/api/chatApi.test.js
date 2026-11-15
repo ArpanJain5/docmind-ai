@@ -65,6 +65,15 @@ describe("streamMessage()", () => {
     expect(options.headers.Authorization).toBe("Bearer abc123");
   });
 
+  it("sends the document id with the first message of a chat about a document", async () => {
+    fetch.mockResolvedValue(streamResponse(["event:done\ndata:{}\n\n"]));
+
+    await streamMessage("hello", null, { onMeta() {}, onToken() {} }, undefined, 3);
+
+    const [, options] = fetch.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ message: "hello", conversationId: null, documentId: 3 });
+  });
+
   it("throws when the server sends an error event", async () => {
     fetch.mockResolvedValue(
       streamResponse([
