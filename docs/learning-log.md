@@ -153,3 +153,16 @@
 - Added 5 Playwright browser tests that register a user, upload a text PDF, a blank PDF, a fake PDF, a broken PDF and a too-big file, refresh, and delete
 - Used generated test PDFs instead of personal documents
 - Broke the code on purpose in several places and watched the right tests fail
+
+## Day 17
+- Built chat with a document: a new chat can be about one of my documents with readable text, and the AI gets the document text with every question
+- Learned: only the first part of the text is sent (12,000 characters), and the person is told when it was cut. Chunks and retrieval are the next step
+- Learned prompt injection: text inside a PDF can try to give the AI orders. I mark it as data, I stop the text from closing its own block, and the AI can only write text
+- Used the ownership rule in a new place: a document id from the request is only used if the document belongs to the user (404 otherwise)
+- Learned: a foreign key blocks deleting a document that chats point to, so I detach those chats first
+- Learned two Hibernate tricks: a read-only copy of a column to get an id without loading a lazy object, and a fetch join (EntityGraph) to load the document name together with the chat list
+- Learned: ddl-auto=update adds columns but never fills them, so I ran an UPDATE to fill char_count for old documents
+- Made the fake AI show the start of the document, so I can see the text arrive in the app
+- Built the UI: a dropdown on a new chat, a ribbon with the document name and a cut-off warning, a 📄 mark in the chat list, and question chips for documents
+- Wrote 15 backend tests (50 in total) and 16 frontend tests (62 in total), and 3 more Playwright tests (8 in total)
+- Wrote the first tests that render the real chat page, with the API mocked. Mutation checks showed they fail when the feature breaks

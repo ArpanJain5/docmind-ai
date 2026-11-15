@@ -49,7 +49,7 @@
 | 12 | Frontend tooling | Vite | ✅ (Day 2) |
 | 13 | AI provider | Groq API (free tier, OpenAI-compatible), behind an AiService interface | ✅ |
 | 14 | PDF text extraction | Apache PDFBox 3.0.7 | ✅ |
-| 15 | Chat-with-PDF approach | Chunking + retrieval (RAG) | 🔜 |
+| 15 | Chat-with-PDF approach | Version 1: the first 12,000 characters of the text go into the prompt (done). Later: chunking + retrieval (RAG) | ✅ v1, 🔜 v2 |
 | 16 | Secrets handling | Environment variables | 🔜 |
 | 17 | Frontend styling | Tailwind CSS or similar | ❓ |
 | 18 | Deployment | Docker + a cloud host | ❓ |
@@ -119,7 +119,14 @@
 | 85 | Where the full text lives | Own table `document_texts` (LONGTEXT, lazy), 300-character preview on the document | ✅ |
 | 86 | Status column type | VARCHAR through `@JdbcTypeCode`, not a MySQL enum | ✅ |
 | 87 | Showing document status | Badge, page count and preview, an unknown status is shown as it is | ✅ |
-| 88 | Browser end-to-end tests | Playwright, 5 flows, run by hand against the running app | ✅ |
+| 88 | Browser end-to-end tests | Playwright, 8 flows, run by hand against the running app | ✅ |
+| 89 | How a chat is tied to a document | `conversations.document_id`, chosen when the chat starts and fixed afterwards | ✅ |
+| 90 | What the AI receives | System prompt plus the first 12,000 characters of the text in a marked block, and the person is told when it was cut | ✅ |
+| 91 | Document text as untrusted input | Marked as data, its tags are defused, and the AI can only write text (prompt injection reduced, not removed) | ✅ |
+| 92 | Deleting a document that chats use | The chats are detached and become ordinary chats | ✅ |
+| 93 | Where the cut-off number lives | `app.ai.max-document-chars` on the server, one mirrored copy in React for a hint only | ✅ |
+| 94 | Choosing a document in the UI | Dropdown on a new chat, a ribbon, and a 📄 mark in the chat list | ✅ |
+| 95 | Testing the chat page | Component tests of the real page with a mocked API, plus 3 more Playwright flows | ✅ |
 
 ---
 
@@ -261,11 +268,11 @@
 - **Limits today:** No OCR, so scans have no text. The order of text in complex layouts (columns, tables) can be imperfect. A tricky file could still use a lot of memory, and the 5 MB and 200-page caps reduce that.
 - **Interview line:** "PDFBox reads the text on the server. I treat the PDF as untrusted input: a type check, a page cap, and every parser failure becomes a clean 422."
 
-### 3.16 Chat with PDF: chunking + retrieval (RAG) 🔜
+### 3.16 Chat with PDF: chunking + retrieval (RAG) (version 1 ✅ Day 17, the rest 🔜)
 - **What:** Split the PDF text into chunks, find the chunks relevant to the question, and send only those to the AI with the question.
 - **Why:** Sending an entire long PDF with every message is slow and expensive, and may exceed the model's context limit.
 - **Plan (start simple, improve later):**
-  1. *Version 1:* Small PDFs go to the AI whole.
+  1. *Version 1 (done on Day 17):* The document text goes to the AI with every question, cut at 12,000 characters, and the person is told when it was cut (see 3.90).
   2. *Version 2:* Chunk the text and rank chunks by keyword match.
   3. *Version 3 (stretch):* Embeddings plus a vector store.
 - **Alternatives for the vector part:** pgvector, Pinecone, Chroma, Elasticsearch.
@@ -444,7 +451,7 @@
 - **Deleting a chat** uses `window.confirm` and cannot be undone.
 - **Streaming:** the Markdown of the whole reply is re-parsed for every piece (fine at these sizes). An interrupted reply is discarded, not resumed, and there are no reconnects.
 - **No syntax highlighting** in code blocks, and Copy copies Markdown, not rich text.
-- **Browser end-to-end tests cover only the documents page** (5 Playwright flows). The chat screen has none, and they need both servers running by hand.
+- **Browser end-to-end tests cover the documents page and chatting about a document** (8 flows). Other chat features (rename, delete, the Stop button) have none, and the tests need both servers running by hand.
 - **No continuous integration:** tests run only on my computer for now.
 - **The integration tests use H2, not MySQL,** and the real Groq call is never tested automatically (it needs a key and costs quota).  On Day 16 this hid a too-small text column that only real MySQL showed. Live checks with curl found it.
 - **The open chat is not in the URL (no `/chat/12`),** so there are no per-chat links or Back-button history.
@@ -457,9 +464,13 @@
 - **Delete uses `window.confirm`** for documents too (real modal planned for Day 35).
 - **PDFs are read fully in memory** during the upload (at most 5 MB and 200 pages). Many parallel uploads could use a lot of memory, and heavy files would move to a background job.
 - **Text order from complex PDFs** (columns, tables) can be imperfect, and there is **no OCR**, so scans show "No text found".
-- **The extracted text is stored but nothing uses it yet.** It is for chat with a PDF.
 - **Schema changes use `ddl-auto=update`,** which never changes an existing column. On Day 16 one column needed a manual `ALTER TABLE` (planned fix: Flyway migrations).
 - **The robot tests leave `e2e-...@example.com` users** in the development database.
+- **Chat with a document sends only the first 12,000 characters.** Questions about later parts cannot be answered, and every question sends the text again. Next step: chunking and retrieval (3.16).
+- **A chat is tied to one document, chosen when it starts.** There is no switching and no second document.
+- **Prompt injection is reduced, not removed** (3.91).
+- **Deleting a document silently turns its chats into ordinary chats,** with no note on screen, and the two steps are not one transaction (3.92).
+- **The cut-off number exists twice:** a server setting and a copy in React for the dropdown hint (3.93).
 
 ### 3.37 JWT with Spring's built-in resource server ✅
 - **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
@@ -587,7 +598,7 @@
 
 ### 3.52 Untrusted AI output (security note) ✅
 - **What:** Text from the model can contain anything a user (or, later, an uploaded PDF) told it to say. Treat it like user input.
-- **Why it matters:** An XSS in our page could read the token from localStorage (see 3.40). It will matter even more for chat with PDF, where a document can try to steer the model (prompt injection).
+- **Why it matters:** An XSS in our page could read the token from localStorage (see 3.40). It will matter even more for chat with PDF, where a document can try to steer the model (prompt injection). Since Day 17 this is real: see 3.91.
 - **How I checked:** With the fake provider echoing `<img onerror>`, a `<script>` tag, and a `javascript:` link, no code ran.
 
 ### 3.53 Copy button copies the Markdown source ✅
@@ -825,6 +836,7 @@
 - **Why not those:** A text column on `documents` is loaded by every list query (a lazy basic column is silently eager without bytecode enhancement). Computing the preview needs the whole text. Files on disk are harder to query and to keep consistent with the database.
 - **Trade-off:** One more table and one more join when the text is really needed.
 - **Interview line:** "I split the heavy data into its own table, so listing stays cheap."
+- **Day 17:** The full text is read only when a chat needs it, with a query that selects just the text and checks the owner.
 
 ### 3.86 Status stored as text, not as a database enum ✅
 - **What:** `@Enumerated(EnumType.STRING)` plus `@JdbcTypeCode(SqlTypes.VARCHAR)`, so the column is `VARCHAR(20)`.
@@ -848,6 +860,63 @@
 - **Why not those:** Manual checks do not repeat. Cypress and Selenium also work, but Playwright waits for the page by itself and downloads its own browser. A mocked backend would miss integration bugs like the Day 16 text column.
 - **Trade-offs:** They are slower, need both servers running, and create test users (`e2e-...@example.com`) in the development database. We write only a few, for the main flows.
 - **Interview line:** "Many fast unit tests, integration tests over real HTTP, and a handful of browser tests for the main flows."
+- **Day 17:** Three more flows (chat about a document and delete the document, scans are not offered, a long document shows the warning), so there are 8 in total.
+
+### 3.89 A chat is tied to one document when it starts ✅
+- **What:** `conversations.document_id` is a nullable link to `documents`. It is chosen with the first message of a new chat. A document id sent together with an existing chat id is refused (400). Only a document that belongs to the user (otherwise 404) and has readable text (otherwise 400) can be chosen.
+- **Why we chose it:** One chat and one document keep the logic simple, and every answer can be traced to one source. Checking the owner at the start means a stranger's document id can never reach the prompt.
+- **Alternatives:** A document on every single message, several documents per chat, or a separate join table.
+- **Why not those:** They need more UI, more prompt logic and more tests. A join table only makes sense once one chat can have many documents.
+- **Trade-off:** You cannot switch documents inside a chat. You start a new chat instead.
+- **Interview line:** "The owner is checked once, when the chat starts, with the same rule I use everywhere: the user id comes from the token, never from the request."
+
+### 3.90 What the AI receives: the first 12,000 characters ✅
+- **What:** The system prompt, a few rules, and the document text between `<document>` markers are sent with every question. The limit is `app.ai.max-document-chars=12000` (roughly 3,000 tokens). Longer text is cut at the limit (never in the middle of an emoji), the prompt says it was cut, and the screen shows a warning (`documentTruncated`, worked out from the stored `char_count`). The fake AI repeats the start of the document so we can see it arrive.
+- **Why we chose it:** It is version 1 from 3.16, the simplest thing that works. AI services limit the size of a request, and every question sends the text again, so a cap protects cost and the free tier's limits. Telling the person about the cut keeps it honest.
+- **Alternatives:** Send the whole text, chunk the text and rank the chunks, embeddings with a vector store, or ask the AI to summarize pages first.
+- **Why not those:** The whole text fails for long PDFs (limit, cost, speed). Chunking and retrieval are the next step (3.16 version 2). Embeddings need extra infrastructure.
+- **Trade-off:** Questions about the later parts of a long document cannot be answered (the test file `long.pdf` hides a secret word on its last page to prove it). Each question pays for the text again.
+- **Interview line:** "I shipped the simplest version, made its limit visible to the user, and kept retrieval as the next step."
+
+### 3.91 Document text is untrusted input (prompt injection) ✅
+- **What:** The text sits between `<document>` tags. The rules say it is data, not instructions. Any `</document` inside the text is changed so it cannot close the block, and a unit test proves that. The AI can only write text: it has no tools and cannot take actions.
+- **Why we chose it:** A PDF from a stranger may say "ignore your rules". A model cannot always tell data from instructions, so we make an attack less likely and less harmful.
+- **Alternatives:** Do nothing, filter suspicious phrases, use a second model as a checker, or strip the text.
+- **Why not those:** Doing nothing is unsafe. Phrase filters are easy to get around and damage real documents. A checking model costs more and can be fooled too.
+- **Honest limit:** The risk is reduced, not removed. A bad document can still make an answer wrong or strange. Because documents and chats belong to one user and the AI has no tools, the damage stays inside that user's own chat.
+- **Interview line:** "I treat document text like user input: marked as data, unable to break out of its block, and the model has no powers beyond writing text. I can reduce prompt injection but not remove it."
+
+### 3.92 Deleting a document that chats use ✅
+- **What:** Before the document is deleted, `document_id` is set to NULL on the chats that use it (`detachDocument`). The chats and their messages stay.
+- **Why we chose it:** The foreign key would otherwise stop the delete with a 500, and deleting someone's chat history because a PDF was deleted would be a nasty surprise.
+- **Alternatives:** Refuse the delete (409), delete the chats too, soft-delete the document, or `ON DELETE SET NULL` in the database.
+- **Why not those:** Refusing annoys people. Deleting history is destructive. Soft delete keeps data the person wanted gone. `ON DELETE SET NULL` is a good option, but `ddl-auto=update` does not create it for us (it needs real migrations).
+- **Trade-off:** The chat quietly becomes an ordinary chat (nothing on screen explains it), and the two steps are not one transaction. If the second step fails, the chat is detached but the document stays.
+- **Interview line:** "A foreign key protects the data, so deleting needs a defined plan for the things that point to the row."
+
+### 3.93 One setting for the cut-off, mirrored once in the UI ✅
+- **What:** The server setting `app.ai.max-document-chars` decides. The chat list returns `documentTruncated`, worked out on the server. React keeps one copy of the number (`DOCUMENT_READ_LIMIT_CHARS`), only to warn in the dropdown before a chat starts.
+- **Why we chose it:** The server must be the authority, because the UI can be outdated or bypassed. But the person should be warned before sending the first message.
+- **Alternatives:** A settings endpoint that React reads, or a hint worked out by the server for each document.
+- **Why not those:** An extra endpoint for one number is too much for now. It is the same pattern as the 5 MB upload limit (3.72).
+- **Trade-off:** The two numbers can drift apart if someone changes only one.
+- **Interview line:** "The server decides, and the copy in the UI is only a hint."
+
+### 3.94 Choosing a document: a dropdown, a ribbon and a mark ✅
+- **What:** On a new chat a dropdown lists the documents with readable text (scans and old rows are not offered). A ribbon shows "Chatting about ..." with a cut-off warning when needed, and the chat list marks these chats with 📄. The document id goes with the first message only. Questions about documents replace the general suggestion chips.
+- **Why we chose it:** People must always know which document an answer comes from, and the choice should be hard to get wrong.
+- **Alternatives:** Upload inside the chat, attach by typing a name, or list every document and fail later.
+- **Why not those:** More UI and more error cases. Listing unusable documents leads to errors.
+- **Trade-off:** A plain `<select>` looks simple, but it is accessible (keyboard, screen readers) and works well on phones.
+- **Interview line:** "The UI only offers choices that can work, and always shows what the chat is about."
+
+### 3.95 Testing the real chat page ✅
+- **What:** Vitest renders the real `ChatPage` with the API modules mocked. It checks that the document is chosen, that its id goes with the first message only, that the ribbon appears, and that existing chats offer no choice. Three more Playwright flows cover chatting about a document and deleting it, scans not being offered, and the long-document warning.
+- **Why we chose it:** On Day 15 helper tests passed while the page itself was broken (a missing import). Rendering the page catches that kind of mistake. Mutation checks showed the tests fail when the feature is broken.
+- **Alternatives:** Manual checks only, or testing the small components only.
+- **Why not those:** Both leave the wiring between the parts untested.
+- **Trade-off:** Mocks can drift from the real API, which is why the robot tests with the real backend stay.
+- **Interview line:** "I test the page that users really see, and I break my own code on purpose to prove the tests can fail."
 
 ---
 
@@ -967,6 +1036,18 @@ A: The list screen only needs a short preview. A separate lazy table keeps big t
 **Q: Tests passed but a bug still reached the running app. What happened?**
 A: The tests use H2, and real MySQL created a text column that was too small. Manual checks with curl and the browser found it. I fixed the column, and learned why both kinds of checks are needed. A MySQL test container would close the gap.
 
+**Q: How does chat with a document work?**
+A: When a chat starts, the user can pick one of their documents. The server checks that it is theirs and has readable text, then stores the link on the conversation. For every question the server puts the document text (the first 12,000 characters) into the prompt, in a marked block, together with the last 20 messages.
+
+**Q: How do you stop a document from taking control of the AI (prompt injection)?**
+A: I reduce it in layers: the text is marked as data, it cannot close its own block (a test proves it), and the AI can only write text, with no tools or actions. I cannot remove the risk completely, so the damage is limited to the user's own chat.
+
+**Q: What if the document is longer than the AI can take?**
+A: Today I cut it at a limit, tell the AI that it was cut, and show a warning to the user. I tested it with a long PDF that hides a secret word on the last page. The proper fix is chunking and retrieval, which is my next step.
+
+**Q: What happens to a chat when its document is deleted?**
+A: The chat stays but becomes an ordinary chat. A foreign key blocks the delete, so I set the link to null first. A test covers it, and I know the two steps are not one transaction.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -1023,6 +1104,8 @@ A: The tests use H2, and real MySQL created a text column that was too small. Ma
 | 16 | Test `doesNotContain("\r")` failed | PDFBox still used Windows line endings in the extracted text | Replaced `\r\n` and `\r` with `\n` at the end of `extract` |
 | 16 | `curl: (26) Failed to open/read local data from file` | The test PDFs were not where the command looked, because Chrome's "Save as PDF" had not saved them | Checked with `Get-ChildItem` and used generated test PDFs from Downloads |
 | 16 | `401 Bearer token is malformed` from curl | `$token` was empty because I had opened a new PowerShell window | Logged in again and checked `$token.Length` before running the uploads |
+| 17 | `Error Code: 1054. Unknown column 'd.char_count'` when running the UPDATE in MySQL Workbench | The new columns are added by Hibernate when the backend starts, and my backend was still the old version | Restarted the backend with the Day 17 code, checked both columns with `SHOW COLUMNS`, then ran the UPDATE to fill `char_count` for old documents (`ddl-auto=update` adds columns but never fills them) |
+| 17 | The new code in `ChatPage.jsx` ran, but nothing changed on the screen | Only 10 of the 12 edits were made. The ribbon and the dropdown were never added, so the new values were computed but never shown | Added the two missing edits. Lint ("defined but never used") and the new ChatPage tests point to this kind of gap |
 
 ---
 
@@ -1061,3 +1144,4 @@ Copy this each time we add a tool:
 | 13 | Added test strategy, H2 test database, real-HTTP integration tests, mocking, Vitest, and the "tests must fail first" decisions; fixed leftover doc errors from the Day 12 review |
 | 14 | Added routing, route guard, responsive drawer, UI states, and component test decisions; settled the styling decision (3.18); updated known limitations |
 | 16 | Marked PDFBox as in use (3.15); added extraction timing, check order, 422 handling, NO_TEXT, separate text table, VARCHAR status, status badge and Playwright decisions; added error-message hiding (3.80); updated known limitations; added 4 interview questions and 5 challenges |
+| 17 | Chat with a document: version 1 of 3.16 done; added decisions 3.89 to 3.95 (document link, the cut text, prompt injection, deleting documents, the cut-off setting, the picker, testing the chat page); updated 3.36, 3.52, 3.85, 3.88 and row 15; added 4 interview questions and 2 challenges |

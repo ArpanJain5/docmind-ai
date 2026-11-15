@@ -1,6 +1,6 @@
 # DocMind AI 🧠
 
-An AI-powered workspace for students, developers, and office teams. Sign up, chat with an AI assistant, and keep every conversation saved in your own private history. PDF Q&A, summaries, email drafting, resume checks, and spam detection are on the roadmap.
+An AI-powered workspace for students, developers, and office teams. Sign up, chat with an AI assistant, upload your PDFs and ask questions about them, and keep every conversation saved in your own private history. Document summaries, email drafting, resume checks, and spam detection are on the roadmap.
 
 > Built step by step as a learning project. Every technology choice, its alternatives, and every problem solved is documented in [docs/tech-decisions.md](docs/tech-decisions.md) and [docs/learning-log.md](docs/learning-log.md).
 
@@ -15,11 +15,11 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - [x] AI replies rendered as Markdown (lists, tables, code) with a Copy button
 - [x] Streaming AI replies with a Stop button
 - [x] Real page addresses (`/login`, `/register`, `/chat`), guarded routes, and a phone-friendly layout
-- [x] PDF upload: validated, size-limited, stored privately per user, with a documents page
 - [x] PDF upload, private to each user, with the text read on the server: page count, preview, and a status (text ready, no text found)
+- [x] Chat about a PDF: pick one of your documents when you start a chat, and the AI answers from its text (the first 12,000 characters, with a clear warning when it is cut)
 
 ### Planned
-- [ ] Chat with PDF documents
+- [ ] Smarter chat with long PDFs (chunks and retrieval)
 - [ ] Document summarizer
 - [ ] AI email generator
 - [ ] Resume checker
@@ -39,8 +39,10 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 
 ```
 [ React (Vite) ]  --HTTP/JSON-->  [ Spring Boot REST API ]  --JDBC-->  [ MySQL ]
-   Login, chat UI                   Controllers -> Services
-   My chats sidebar                 JWT security, ownership checks
+   Login, chat UI                   Controllers -> Services              users, chats,
+   My chats sidebar                 JWT security, ownership checks       documents, texts
+   Documents page                           |
+                                            +--files-->  [ local disk (PDFs) ]
                                             |
                                             +--HTTPS-->  [ LLM API ]
 ```
@@ -52,24 +54,25 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 | `POST /api/auth/register` | open | Create an account |
 | `POST /api/auth/login` | open | Log in, returns a JWT |
 | `GET /api/auth/me` | token | Current user |
-| `POST /api/chat` | token | Send a message, get the AI reply |
-| `GET /api/conversations` | token | List my chats |
+| `POST /api/chat` | token | Send a message, get the AI reply. For a new chat the body may contain `documentId` to chat about one of your documents |
+| `POST /api/chat/stream` | token | The same, but the reply arrives as a stream of events |
+| `GET /api/conversations` | token | My chats (with the document name and whether its text was cut, if the chat is about a document) |
 | `GET /api/conversations/{id}/messages` | token | Messages of one of my chats |
 | `PATCH /api/conversations/{id}` | token | Rename my chat |
 | `DELETE /api/conversations/{id}` | token | Delete my chat |
-| `POST /api/chat/stream` | token | Send a message, get the reply as a stream of events |
 | `POST /api/documents` | token | Upload a PDF (max 5 MB). Returns status, page count and preview |
-| GET /api/documents | token | List my documents |
-| DELETE /api/documents/{id} | token | Delete my document |
+| `GET /api/documents` | token | List my documents |
+| `DELETE /api/documents/{id}` | token | Delete my document (chats about it become ordinary chats) |
 
 ## Security highlights
 - Passwords hashed with BCrypt; never stored or logged
 - Stateless JWT authentication (signed, short-lived)
-- Every chat lookup includes the owner from the verified token, so other users' chats return 404
+- Every chat and document lookup includes the owner from the verified token, so other users' data returns 404
 - Secrets live in a git-ignored `application-local.properties`; only a `.example` file is committed
 - AI calls have timeouts, a message length limit, and a capped history; failures return a friendly 502 and details stay in the logs
 - Uploads: size limit, file type checked by content, random file names, per-user ownership
 - Uploads are checked by their first bytes, then parsed with a page cap. Unreadable files get a clean 422, and error replies never show stack traces, SQL or exception names
+- Chat documents: only your own documents can be attached (404 otherwise), and document text is treated as untrusted data (prompt injection is reduced, with a test that the text cannot break out of its block)
 
 ## Run it locally
 
@@ -94,6 +97,7 @@ $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create
 ```
 
 - the AI: keep `app.ai.provider=fake` to run with no key, or set `groq` with your own API key and model
+- optional: `app.ai.max-document-chars` (default 12000) sets how much of a document the AI reads with each question
 
 **3. Start the backend:**
 
@@ -110,24 +114,24 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173, create an account, and start chatting.
+Open http://localhost:5173, create an account, and start chatting. Upload a PDF on the Documents page to chat about it.
 
 ## Tests
 
 ```powershell
 cd backend
-.\mvnw test        # 35 tests: unit tests, PDF extractor tests, real-HTTP integration tests (in-memory database, fake AI)
+.\mvnw test        # 50 tests: unit tests, PDF extractor and prompt tests, real-HTTP integration tests (in-memory database, fake AI)
 
 cd ..\frontend
-npm test           # 46 Vitest tests (request helper, stream reader, upload, documents page, routes)
-npm run e2e        # 5 Playwright browser tests (needs the backend and the frontend running)
+npm test           # 62 Vitest tests (request helper, stream reader, upload, documents page, chat page, routes)
+npm run e2e        # 8 Playwright browser tests (needs the backend and the frontend running)
 ```
 
 ## Project structure
 
 ```
 backend/   Spring Boot API (ai, config, controller, dto, model, repository, service)
-frontend/  React app (api helpers, auth context, pages) and e2e/ (Playwright tests)
+frontend/  React app (api helpers, auth context, components, pages) and e2e/ (Playwright tests)
 docs/      learning-log.md and tech-decisions.md
 ```
 
@@ -152,7 +156,8 @@ docs/      learning-log.md and tech-decisions.md
 | 14 | React Router, route guards, phone drawer, loading/error/empty states | ✅ |
 | 15 | PDF upload with checks, private storage and a documents page | ✅ |
 | 16 | Read the text of PDFs (PDFBox), status, page count, preview, browser tests | ✅ |
-| 17 | Chat with a PDF | 🔜 Next |
+| 17 | Chat with a PDF (version 1: the first part of the text, with a warning) | ✅ |
+| 18 | Smarter chat with long PDFs (chunks and retrieval) | 🔜 Next |
 
 ## Roadmap
-Chat polish and tests, then PDF upload and chat with PDF, summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.
+Smarter chat with long PDFs (chunks and retrieval), then summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.
