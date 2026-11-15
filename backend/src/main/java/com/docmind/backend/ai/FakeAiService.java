@@ -40,7 +40,10 @@ public class FakeAiService implements AiService {
 
     // So we can SEE in the app that the document text really reached the AI
     private String documentHint(String systemPrompt) {
-        int start = systemPrompt == null ? -1 : systemPrompt.indexOf(DOCUMENT_START);
+        if (systemPrompt == null) {
+            return "";
+        }
+        int start = systemPrompt.indexOf(DOCUMENT_START);
         if (start < 0) {
             return "";
         }
