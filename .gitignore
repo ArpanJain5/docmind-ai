@@ -44,3 +44,7 @@ Thumbs.db
 
 # Uploaded files
 uploads/
+
+# Playwright
+test-results/
+playwright-report/
