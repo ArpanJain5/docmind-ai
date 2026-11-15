@@ -71,7 +71,7 @@ class ChatServiceTest {
 
     @BeforeEach
     void setUp() {
-        chatService = new ChatService(
+            chatService = new ChatService(
             conversationRepository, messageRepository, userRepository,
             documentRepository, aiService, 12_000);
 
