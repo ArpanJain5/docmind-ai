@@ -274,12 +274,32 @@ class DocumentApiTest {
         String chats = send("GET", "/api/conversations", token).body();
         assertThat(((Number) JsonPath.read(chats, "$[0].documentId")).longValue()).isEqualTo(documentId);
         assertThat((String) JsonPath.read(chats, "$[0].documentName")).isEqualTo("secret.pdf");
-        assertThat((Boolean) JsonPath.read(chats, "$[0].documentTruncated")).isFalse();
+        assertThat((Boolean) JsonPath.read(chats, "$[0].documentLong")).isFalse();
 
         // A follow-up question in the same chat still has the document
         HttpResponse<String> second = postJson("/api/chat",
                 "{\"message\":\"And again?\",\"conversationId\":" + conversationId + "}", token);
         assertThat((String) JsonPath.read(second.body(), "$.reply")).contains("PINEAPPLE-42");
+    }
+
+    @Test
+    void aLongDocumentIsSearchedForTheAnswerToTheQuestion() throws Exception {
+        String token = registerAndLogin();
+        String filler = "The weather is mild and the trains run on time. ".repeat(60); // about 2,900 characters
+        byte[] longPdf = TestPdfs.withPages(filler, filler, filler, filler, filler,
+                "The final secret word is KANGAROO. " + filler);
+        long documentId = uploadAndGetId(token, "long.pdf", longPdf);
+
+        HttpResponse<String> reply = postJson("/api/chat",
+                "{\"message\":\"What is the final secret word?\",\"documentId\":" + documentId + "}", token);
+
+        assertThat(reply.statusCode()).isEqualTo(200);
+        String text = JsonPath.read(reply.body(), "$.reply");
+        assertThat(text).contains("excerpts");                  // too long to send whole, so excerpts were chosen
+        assertThat(text).contains("final, secret, word");       // and they contain the words of the question
+
+        String chats = send("GET", "/api/conversations", token).body();
+        assertThat((Boolean) JsonPath.read(chats, "$[0].documentLong")).isTrue();
     }
 
     @Test

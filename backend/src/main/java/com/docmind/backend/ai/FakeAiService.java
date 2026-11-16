@@ -3,7 +3,9 @@ package com.docmind.backend.ai;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 
 @Service
@@ -35,11 +37,11 @@ public class FakeAiService implements AiService {
     private String buildReply(String systemPrompt, List<AiMessage> history) {
         String lastMessage = history.isEmpty() ? "" : history.get(history.size() - 1).content();
         return "You said: \"" + lastMessage + "\". (Fake AI reply. Set app.ai.provider=groq for the real one.)"
-                + documentHint(systemPrompt);
+                + documentHint(systemPrompt, lastMessage);
     }
 
-    // So we can SEE in the app that the document text really reached the AI
-    private String documentHint(String systemPrompt) {
+    // So we can SEE in the app what document text really reached the AI
+    private String documentHint(String systemPrompt, String question) {
         if (systemPrompt == null) {
             return "";
         }
@@ -48,12 +50,32 @@ public class FakeAiService implements AiService {
             return "";
         }
         int end = systemPrompt.lastIndexOf(DOCUMENT_END);
-        String text = (end > start)
+        String block = (end > start)
                 ? systemPrompt.substring(start + DOCUMENT_START.length(), end)
                 : systemPrompt.substring(start + DOCUMENT_START.length());
-        String oneLine = text.replaceAll("\\s+", " ").strip();
-        String beginning = oneLine.length() > 60 ? oneLine.substring(0, 60) + "..." : oneLine;
-        return " [Document attached, it starts with: \"" + beginning + "\"]";
+        String oneLine = block.replaceAll("\\s+", " ").strip();
+
+        boolean excerpts = systemPrompt.contains("you only see excerpts");
+        if (!excerpts) {
+            String beginning = oneLine.length() > 60 ? oneLine.substring(0, 60) + "..." : oneLine;
+            return " [Document attached, it starts with: \"" + beginning + "\"]";
+        }
+
+        int parts = block.split("\\[\\.\\.\\.\\]", -1).length;
+        return " [Document attached: " + parts + " excerpts, " + oneLine.length() + " characters. "
+                + "Words from your question found in them: " + foundWords(question, oneLine) + "]";
+    }
+
+    // Which longer words of the question appear in the text the AI received?
+    private String foundWords(String question, String text) {
+        String lowerText = text.toLowerCase(Locale.ROOT);
+        List<String> found = new ArrayList<>();
+        for (String word : question.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
+            if (word.length() >= 4 && !found.contains(word) && lowerText.contains(word)) {
+                found.add(word);
+            }
+        }
+        return found.isEmpty() ? "none" : String.join(", ", found);
     }
 
     private void pause(long millis) {

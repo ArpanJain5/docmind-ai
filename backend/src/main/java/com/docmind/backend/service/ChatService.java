@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -119,8 +120,7 @@ public class ChatService {
         String reply;
         try {
             onConversation.accept(conversation.getId());
-            String systemPrompt = buildSystemPrompt(userId, conversation);
-            reply = callAi(conversation.getId(), systemPrompt, aiCall);
+            reply = callAi(userId, conversation, aiCall);
         } catch (RuntimeException e) {
             // The AI failed, or the browser stopped listening: undo what we saved
             messageRepository.deleteById(savedUserMessage.getId());
@@ -157,23 +157,30 @@ public class ChatService {
         return document;
     }
 
-    // The instructions for the AI. For a chat about a document they include the (cut) text.
-    private String buildSystemPrompt(Long userId, Conversation conversation) {
+    // The instructions for the AI. For a chat about a document they include the text of the document:
+    // all of it when it is short, otherwise the excerpts that match what the person is asking.
+    private String buildSystemPrompt(Long userId, Conversation conversation, String question) {
         Long documentId = conversation.getDocumentId();
         if (documentId == null) {
             return SYSTEM_PROMPT;
         }
         return documentRepository.findTextByIdAndUserId(documentId, userId)
-                .map(text -> PromptBuilder.withDocument(SYSTEM_PROMPT, text, maxDocumentChars))
+                .map(text -> {
+                    DocumentRetriever.Selection selection =
+                            DocumentRetriever.select(text, question, maxDocumentChars);
+                    return PromptBuilder.withDocument(SYSTEM_PROMPT, selection.text(), !selection.whole());
+                })
                 .orElse(SYSTEM_PROMPT);
     }
 
-    private String callAi(Long conversationId, String systemPrompt, AiCall aiCall) {
-        List<Message> all = messageRepository.findByConversationIdOrderByIdAsc(conversationId);
+    private String callAi(Long userId, Conversation conversation, AiCall aiCall) {
+        List<Message> all = messageRepository.findByConversationIdOrderByIdAsc(conversation.getId());
         List<Message> recent = all.subList(Math.max(0, all.size() - MAX_HISTORY_MESSAGES), all.size());
         List<AiMessage> history = recent.stream()
                 .map(m -> new AiMessage(m.getRole(), m.getContent()))
                 .toList();
+
+        String systemPrompt = buildSystemPrompt(userId, conversation, recentQuestions(all));
 
         try {
             return aiCall.run(systemPrompt, history);
@@ -182,6 +189,18 @@ public class ChatService {
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY, "The AI service is unavailable", e);
         }
+    }
+
+    // The words of the last two questions. A follow-up like "and the second one?" says nothing
+    // by itself, so the question before it helps to find the right parts of the document.
+    private static String recentQuestions(List<Message> all) {
+        List<String> questions = new ArrayList<>();
+        for (int i = all.size() - 1; i >= 0 && questions.size() < 2; i--) {
+            if (all.get(i).getRole() == Role.USER) {
+                questions.add(all.get(i).getContent());
+            }
+        }
+        return String.join(" ", questions);
     }
 
     // ---------- chats list, messages, rename, delete ----------

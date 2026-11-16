@@ -334,4 +334,46 @@ class ChatServiceTest {
         assertThat(statusOf(error)).isEqualTo(400);
         verify(messageRepository, never()).save(any(Message.class));
     }
+
+        // ---------- chatting about a LONG document ----------
+
+    private static String longText() {
+        String filler = "The weather is mild and the trains run on time. ";
+        return filler.repeat(400) + "The final secret word is KANGAROO. " + filler.repeat(50);
+    }
+
+    @Test
+    void aLongDocumentSendsTheExcerptThatMatchesTheQuestion() {
+        when(documentRepository.findByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of(readableDocument(3L)));
+        when(documentRepository.findTextByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of(longText()));
+
+        chatService.chat(USER_ID, null, 3L, "What is the final secret word?");
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(aiService).complete(prompt.capture(), anyList());
+        assertThat(prompt.getValue()).contains("KANGAROO").contains("only see excerpts");
+        assertThat(prompt.getValue().length()).isLessThan(13_000); // far less than the whole document
+    }
+
+    @Test
+    void aFollowUpQuestionStillUsesTheWordsOfThePreviousQuestion() {
+        Conversation existing = new Conversation(null, "About a document", readableDocument(3L));
+        existing.setId(9L);
+        when(conversationRepository.findByIdAndUserId(9L, USER_ID)).thenReturn(Optional.of(existing));
+        when(documentRepository.findTextByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of(longText()));
+
+        Message earlier = new Message(existing, Role.USER, "What is the final secret word?");
+        earlier.setId(1L);
+        savedMessages.add(earlier);
+        Message answer = new Message(existing, Role.ASSISTANT, "I am not sure.");
+        answer.setId(2L);
+        savedMessages.add(answer);
+
+        // "repeat that" says nothing about the document by itself
+        chatService.chat(USER_ID, 9L, "Can you repeat that?");
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(aiService).complete(prompt.capture(), anyList());
+        assertThat(prompt.getValue()).contains("KANGAROO");
+    }
 }

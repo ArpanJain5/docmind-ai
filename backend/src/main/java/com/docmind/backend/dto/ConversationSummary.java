@@ -6,13 +6,14 @@ import com.docmind.backend.model.Document;
 import java.time.Instant;
 
 // documentId and documentName are null for an ordinary chat.
-// documentTruncated is true when the AI only sees the beginning of the document.
+// documentLong is true when the document is too long to send whole:
+// the AI then sees only the parts that match the question.
 public record ConversationSummary(Long id, String title, Instant createdAt,
-                                  Long documentId, String documentName, boolean documentTruncated) {
+                                  Long documentId, String documentName, boolean documentLong) {
 
     public static ConversationSummary from(Conversation conversation, int maxDocumentChars) {
         Document document = conversation.getDocument();
-        boolean truncated = document != null
+        boolean isLong = document != null
                 && document.getCharCount() != null
                 && document.getCharCount() > maxDocumentChars;
 
@@ -22,6 +23,6 @@ public record ConversationSummary(Long id, String title, Instant createdAt,
                 conversation.getCreatedAt(),
                 document == null ? null : document.getId(),
                 document == null ? null : document.getOriginalFilename(),
-                truncated);
+                isLong);
     }
 }
