@@ -31,6 +31,7 @@ const report = {
   createdAt: "2026-11-03T10:00:00Z",
 };
 const scan = { ...report, id: 4, originalFilename: "scan.pdf", status: "NO_TEXT", pageCount: 1, charCount: 0 };
+const book = { ...report, id: 5, originalFilename: "book.pdf", pageCount: 300, charCount: 400000 };
 
 const chatAboutReport = {
   id: 5,
@@ -38,7 +39,7 @@ const chatAboutReport = {
   createdAt: "2026-11-04T10:00:00Z",
   documentId: 3,
   documentName: "report.pdf",
-  documentTruncated: false,
+  documentLong: false,
 };
 
 beforeEach(() => {
@@ -117,14 +118,24 @@ describe("ChatPage and documents", () => {
     expect(chatApi.streamMessage.mock.calls[0][4]).toBeNull();
   });
 
-  it("shows the document and the cut-off warning for an open chat, without the choice", async () => {
+  it("explains for a long document that only the matching parts are read, even before the chat list is refreshed", async () => {
+    documentsApi.fetchDocuments.mockResolvedValue([report, book]);
+    renderChat(); // the chat list stays empty, so the ribbon must come from the choice
+
+    fireEvent.change(await screen.findByLabelText("Chat about a document"), { target: { value: "5" } });
+    send("What is the final secret word?");
+
+    expect(await screen.findByText(/reads the parts that match your question/)).toBeTruthy();
+  });
+
+  it("shows the document and the note about long documents for an open chat, without the choice", async () => {
     localStorage.setItem("docmind.conversationId", "5");
     chatApi.fetchMessages.mockResolvedValue([{ role: "user", text: "Summarize it" }]);
-    chatApi.fetchConversations.mockResolvedValue([{ ...chatAboutReport, documentTruncated: true }]);
+    chatApi.fetchConversations.mockResolvedValue([{ ...chatAboutReport, documentLong: true }]);
     renderChat();
 
     expect(await screen.findByText(/Chatting about/)).toBeTruthy();
-    expect(screen.getByText(/reads only the first part/)).toBeTruthy();
+    expect(screen.getByText(/reads the parts that match your question/)).toBeTruthy();
     expect(screen.queryByLabelText("Chat about a document")).toBeNull();
   });
 
@@ -132,7 +143,7 @@ describe("ChatPage and documents", () => {
     localStorage.setItem("docmind.conversationId", "6");
     chatApi.fetchMessages.mockResolvedValue([{ role: "user", text: "Hi" }]);
     chatApi.fetchConversations.mockResolvedValue([
-      { id: 6, title: "Hi", createdAt: "2026-11-04T10:00:00Z", documentId: null, documentName: null, documentTruncated: false },
+      { id: 6, title: "Hi", createdAt: "2026-11-04T10:00:00Z", documentId: null, documentName: null, documentLong: false },
     ]);
     renderChat();
 
@@ -144,7 +155,7 @@ describe("ChatPage and documents", () => {
     localStorage.setItem("docmind.conversationId", "7");
     chatApi.fetchMessages.mockResolvedValue([]); // an open chat without messages
     chatApi.fetchConversations.mockResolvedValue([
-      { id: 7, title: "Empty", createdAt: "2026-11-04T10:00:00Z", documentId: null, documentName: null, documentTruncated: false },
+      { id: 7, title: "Empty", createdAt: "2026-11-04T10:00:00Z", documentId: null, documentName: null, documentLong: false },
     ]);
     renderChat();
 

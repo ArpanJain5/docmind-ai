@@ -56,13 +56,13 @@ describe("DocumentPicker", () => {
     expect(container.textContent).toBe("");
   });
 
-  it("warns when the chosen document is long", () => {
+  it("says that a long document is searched", () => {
     renderPicker({ documents: [report, book], selectedId: 5 });
-    expect(screen.getByText(/reads only the first part/)).toBeTruthy();
+    expect(screen.getByText(/searches it and reads the parts that match your question/)).toBeTruthy();
   });
 
-  it("does not warn for a short document", () => {
+  it("says nothing special about a short document", () => {
     renderPicker({ documents: [report, book], selectedId: 3 });
-    expect(screen.queryByText(/reads only the first part/)).toBeNull();
+    expect(screen.queryByText(/This document is long/)).toBeNull();
   });
 });

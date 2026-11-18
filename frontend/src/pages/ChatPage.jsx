@@ -7,7 +7,7 @@ import {
   renameConversation,
   streamMessage,
 } from "../api/chatApi";
-import { DOCUMENT_READ_LIMIT_CHARS, fetchDocuments } from "../api/documentsApi";
+import { LONG_DOCUMENT_CHARS, fetchDocuments } from "../api/documentsApi";
 import DocumentBanner from "../components/DocumentBanner";
 import DocumentPicker from "../components/DocumentPicker";
 import MessageBubble from "../components/MessageBubble";
@@ -68,11 +68,11 @@ function ChatPage() {
   const currentChat = conversations.find((chat) => chat.id === conversationId) ?? null;
   let attached = null;
   if (currentChat?.documentName) {
-    attached = { name: currentChat.documentName, truncated: currentChat.documentTruncated };
+    attached = { name: currentChat.documentName, isLong: currentChat.documentLong };
   } else if (conversationId !== null && !currentChat && selectedDoc) {
     attached = {
       name: selectedDoc.originalFilename,
-      truncated: selectedDoc.charCount > DOCUMENT_READ_LIMIT_CHARS,
+      isLong: selectedDoc.charCount > LONG_DOCUMENT_CHARS,
     };
   }
   const suggestions = selectedDoc ? DOCUMENT_SUGGESTIONS : SUGGESTIONS;
@@ -475,7 +475,7 @@ function ChatPage() {
           </div>
         </div>
 
-        {attached && <DocumentBanner name={attached.name} truncated={attached.truncated} />}
+        {attached && <DocumentBanner name={attached.name} isLong={attached.isLong} />}
 
         <div
           className="messages"

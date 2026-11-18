@@ -44,3 +44,10 @@
 .docchat-warning {
   opacity: 0.9;
 }
+
+/* The opened list is drawn by the browser with a light background,
+   so its text needs a dark colour (in a dark theme it was white on white) */
+.docchat-picker select option {
+  color: #111;
+  background: #fff;
+}

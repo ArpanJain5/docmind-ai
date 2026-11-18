@@ -1,5 +1,5 @@
 import { Link } from "react-router";
-import { DOCUMENT_READ_LIMIT_CHARS } from "../api/documentsApi";
+import { LONG_DOCUMENT_CHARS } from "../api/documentsApi";
 import { formatPages } from "../utils/format";
 import "./DocumentChat.css";
 
@@ -27,7 +27,7 @@ function DocumentPicker({ documents, status, selectedId, onSelect }) {
   }
 
   const selected = readable.find((doc) => doc.id === selectedId);
-  const isLong = selected && selected.charCount > DOCUMENT_READ_LIMIT_CHARS;
+  const isLong = selected && selected.charCount > LONG_DOCUMENT_CHARS;
 
   return (
     <div className="docchat-picker">
@@ -48,7 +48,7 @@ function DocumentPicker({ documents, status, selectedId, onSelect }) {
       </select>
       {isLong && (
         <p className="docchat-hint">
-          This document is long. DocMind reads only the first part of it.
+          This document is long. DocMind searches it and reads the parts that match your question.
         </p>
       )}
     </div>

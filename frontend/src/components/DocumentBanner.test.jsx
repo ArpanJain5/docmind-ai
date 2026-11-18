@@ -7,20 +7,20 @@ afterEach(cleanup);
 
 describe("DocumentBanner", () => {
   it("shows which document the chat is about", () => {
-    render(<DocumentBanner name="report.pdf" truncated={false} />);
+    render(<DocumentBanner name="report.pdf" isLong={false} />);
 
     expect(screen.getByText("report.pdf")).toBeTruthy();
-    expect(screen.queryByText(/only the first part/)).toBeNull();
+    expect(screen.queryByText(/This document is long/)).toBeNull();
   });
 
-  it("warns when the AI only reads the beginning", () => {
-    render(<DocumentBanner name="book.pdf" truncated />);
+  it("explains that a long document is searched for the parts that match each question", () => {
+    render(<DocumentBanner name="book.pdf" isLong />);
 
-    expect(screen.getByText(/only the first part/)).toBeTruthy();
+    expect(screen.getByText(/reads the parts that match your question/)).toBeTruthy();
   });
 
   it("shows nothing for an ordinary chat", () => {
-    const { container } = render(<DocumentBanner name={null} truncated={false} />);
+    const { container } = render(<DocumentBanner name={null} isLong={false} />);
 
     expect(container.textContent).toBe("");
   });
