@@ -166,3 +166,17 @@
 - Built the UI: a dropdown on a new chat, a ribbon with the document name and a cut-off warning, a 📄 mark in the chat list, and question chips for documents
 - Wrote 15 backend tests (50 in total) and 16 frontend tests (62 in total), and 3 more Playwright tests (8 in total)
 - Wrote the first tests that render the real chat page, with the API mocked. Mutation checks showed they fail when the feature breaks
+
+## Day 18
+- Made chat work for long documents: a short document is still sent whole, a long one is cut into chunks and searched, so the AI gets the parts that match the question
+- Learned chunking: pieces of about 1,000 characters that overlap a little, cut at a paragraph, sentence or word, and never inside an emoji. A chunk is only a start and an end position in the text
+- Learned BM25, a classic keyword search: rare words count more than common ones, repeated words help with diminishing returns, and very common words (the, is, of) are dropped
+- Learned why I chose keyword search and not embeddings: no extra service, no vector storage, and it can be tested in plain Java. Its weakness is that it cannot match different words with the same meaning (price and cost)
+- Learned to choose what the AI sees: the first chunk always, then the best matches, then their neighbours, in document order with [...] between gaps. A question without useful words (summarize this) gets chunks spread over the whole document
+- Learned that a follow-up question (can you repeat that?) has no words about the document, so the search also uses my previous question
+- Learned to tell the AI the truth about what it sees: it only gets excerpts, so it must say "I could not find it in the parts I can see" and not "the document does not contain it"
+- Changed the API flag documentTruncated into documentLong and updated the screen wording, because nothing is cut off any more
+- Made the fake AI list which words of my question it found in the text it received, so I can see the search work without a real AI
+- Wrote 18 backend tests (68 in total), 1 frontend test (63 in total), and changed the robot test so it asks for the secret word on the last page of a long PDF
+- Checked the search on my real long.pdf: the question about the final secret word now sends 4 of 35 chunks and finds KANGAROO, which the first-12,000-characters version could never do
+- Broke the code on purpose in several places and watched the right tests fail

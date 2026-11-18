@@ -49,7 +49,7 @@
 | 12 | Frontend tooling | Vite | ✅ (Day 2) |
 | 13 | AI provider | Groq API (free tier, OpenAI-compatible), behind an AiService interface | ✅ |
 | 14 | PDF text extraction | Apache PDFBox 3.0.7 | ✅ |
-| 15 | Chat-with-PDF approach | Version 1: the first 12,000 characters of the text go into the prompt (done). Later: chunking + retrieval (RAG) | ✅ v1, 🔜 v2 |
+| 15 | Chat-with-PDF approach | Version 1 (Day 17): the first 12,000 characters. Version 2 (Day 18): chunks plus keyword search (BM25) for long documents. Later: embeddings | ✅ v1, ✅ v2, 🔜 v3 |
 | 16 | Secrets handling | Environment variables | 🔜 |
 | 17 | Frontend styling | Tailwind CSS or similar | ❓ |
 | 18 | Deployment | Docker + a cloud host | ❓ |
@@ -121,12 +121,19 @@
 | 87 | Showing document status | Badge, page count and preview, an unknown status is shown as it is | ✅ |
 | 88 | Browser end-to-end tests | Playwright, 8 flows, run by hand against the running app | ✅ |
 | 89 | How a chat is tied to a document | `conversations.document_id`, chosen when the chat starts and fixed afterwards | ✅ |
-| 90 | What the AI receives | System prompt plus the first 12,000 characters of the text in a marked block, and the person is told when it was cut | ✅ |
+| 90 | What the AI receives | A short document whole. A long one: the best-matching excerpts (up to about 12,000 characters) in a marked block | ✅ |
 | 91 | Document text as untrusted input | Marked as data, its tags are defused, and the AI can only write text (prompt injection reduced, not removed) | ✅ |
 | 92 | Deleting a document that chats use | The chats are detached and become ordinary chats | ✅ |
-| 93 | Where the cut-off number lives | `app.ai.max-document-chars` on the server, one mirrored copy in React for a hint only | ✅ |
+| 93 | Where the "long document" number lives | `app.ai.max-document-chars` on the server (it is also the size of what is sent), one mirrored copy in React (`LONG_DOCUMENT_CHARS`) for a hint only | ✅ |
 | 94 | Choosing a document in the UI | Dropdown on a new chat, a ribbon, and a 📄 mark in the chat list | ✅ |
 | 95 | Testing the chat page | Component tests of the real page with a mocked API, plus 3 more Playwright flows | ✅ |
+| 96 | Chunking | About 1,000 characters per chunk, 150 characters of overlap, cut at paragraph, sentence or word, a chunk is only a start and an end position | ✅ |
+| 97 | Ranking chunks | BM25 keyword search in memory (no embeddings, no MySQL FULLTEXT, no search server) | ✅ |
+| 98 | When chunks are made | At question time, nothing is stored (no chunk table) | ✅ |
+| 99 | Which parts the AI gets | Short: whole. Long: the first chunk, the best matches, their neighbours, in document order with [...] gaps, or an even spread when the question has no useful words | ✅ |
+| 100 | Follow-up questions | The search uses the words of the last two questions | ✅ |
+| 101 | The "long document" flag | `documentLong` in the API (replaces `documentTruncated`), and new wording on the screen | ✅ |
+| 102 | Testing the search | Plain Java unit tests, a mocked-AI chat test, a real-HTTP test with a fake AI that reports the words it received, and a robot test about the last page | ✅ |
 
 ---
 
@@ -268,12 +275,12 @@
 - **Limits today:** No OCR, so scans have no text. The order of text in complex layouts (columns, tables) can be imperfect. A tricky file could still use a lot of memory, and the 5 MB and 200-page caps reduce that.
 - **Interview line:** "PDFBox reads the text on the server. I treat the PDF as untrusted input: a type check, a page cap, and every parser failure becomes a clean 422."
 
-### 3.16 Chat with PDF: chunking + retrieval (RAG) (version 1 ✅ Day 17, the rest 🔜)
+### 3.16 Chat with PDF: chunking + retrieval (RAG) (versions 1 and 2 ✅, version 3 🔜)
 - **What:** Split the PDF text into chunks, find the chunks relevant to the question, and send only those to the AI with the question.
 - **Why:** Sending an entire long PDF with every message is slow and expensive, and may exceed the model's context limit.
 - **Plan (start simple, improve later):**
   1. *Version 1 (done on Day 17):* The document text goes to the AI with every question, cut at 12,000 characters, and the person is told when it was cut (see 3.90).
-  2. *Version 2:* Chunk the text and rank chunks by keyword match.
+  2. *Version 2 (done on Day 18):* Long documents are cut into chunks, the chunks are ranked by keyword match (BM25), and the best parts are sent (see 3.96 to 3.100).
   3. *Version 3 (stretch):* Embeddings plus a vector store.
 - **Alternatives for the vector part:** pgvector, Pinecone, Chroma, Elasticsearch.
 - **Why not now:** A vector database adds infrastructure and learning load. We prove the product works with simple retrieval first.
@@ -466,11 +473,16 @@
 - **Text order from complex PDFs** (columns, tables) can be imperfect, and there is **no OCR**, so scans show "No text found".
 - **Schema changes use `ddl-auto=update`,** which never changes an existing column. On Day 16 one column needed a manual `ALTER TABLE` (planned fix: Flyway migrations).
 - **The robot tests leave `e2e-...@example.com` users** in the development database.
-- **Chat with a document sends only the first 12,000 characters.** Questions about later parts cannot be answered, and every question sends the text again. Next step: chunking and retrieval (3.16).
 - **A chat is tied to one document, chosen when it starts.** There is no switching and no second document.
 - **Prompt injection is reduced, not removed** (3.91).
 - **Deleting a document silently turns its chats into ordinary chats,** with no note on screen, and the two steps are not one transaction (3.92).
 - **The cut-off number exists twice:** a server setting and a copy in React for the dropdown hint (3.93).
+- **Search matches words, not meaning.** "price" does not find "cost", and there is no stemming or typo handling. Next step: embeddings, or a mix of both (3.97).
+- **A summary of a long document is based on a sample** of it, not on all of it (3.99).
+- **Chunks are made again for every question** and nothing is stored. Fine for 200 pages, wasteful for more (3.98).
+- **No page numbers are kept,** so an answer cannot say where it came from yet. Planned: sources (Day 19).
+- **The chunk size (1,000) and the overlap (150) are guesses.** They were not tuned with a set of real questions.
+- **The "long document" number exists twice:** a server setting and a copy in React for the dropdown hint (3.93).
 
 ### 3.37 JWT with Spring's built-in resource server ✅
 - **What:** After login, the server returns a signed token. Spring Security's `oauth2ResourceServer().jwt()` reads `Authorization: Bearer <token>` on each request and checks the signature and expiry. We create tokens with `NimbusJwtEncoder`.
@@ -871,12 +883,13 @@
 - **Interview line:** "The owner is checked once, when the chat starts, with the same rule I use everywhere: the user id comes from the token, never from the request."
 
 ### 3.90 What the AI receives: the first 12,000 characters ✅
-- **What:** The system prompt, a few rules, and the document text between `<document>` markers are sent with every question. The limit is `app.ai.max-document-chars=12000` (roughly 3,000 tokens). Longer text is cut at the limit (never in the middle of an emoji), the prompt says it was cut, and the screen shows a warning (`documentTruncated`, worked out from the stored `char_count`). The fake AI repeats the start of the document so we can see it arrive.
+- **What:** (Day 18 update) A short document is sent whole. A long one is searched and only the best-matching excerpts are sent, up to `app.ai.max-document-chars=12000` (roughly 3,000 tokens), see 3.96 to 3.100. The text sits in a marked block with rules for the AI, and the fake AI repeats what reached it so we can see it in the app.
 - **Why we chose it:** It is version 1 from 3.16, the simplest thing that works. AI services limit the size of a request, and every question sends the text again, so a cap protects cost and the free tier's limits. Telling the person about the cut keeps it honest.
 - **Alternatives:** Send the whole text, chunk the text and rank the chunks, embeddings with a vector store, or ask the AI to summarize pages first.
 - **Why not those:** The whole text fails for long PDFs (limit, cost, speed). Chunking and retrieval are the next step (3.16 version 2). Embeddings need extra infrastructure.
 - **Trade-off:** Questions about the later parts of a long document cannot be answered (the test file `long.pdf` hides a secret word on its last page to prove it). Each question pays for the text again.
 - **Interview line:** "I shipped the simplest version, made its limit visible to the user, and kept retrieval as the next step."
+- **Day 18:** The Day 17 behaviour (cut at 12,000 characters, a warning on the screen) was replaced by search. The "secret word on the last page" test file, which the Day 17 version could not answer, is now answered.
 
 ### 3.91 Document text is untrusted input (prompt injection) ✅
 - **What:** The text sits between `<document>` tags. The rules say it is data, not instructions. Any `</document` inside the text is changed so it cannot close the block, and a unit test proves that. The AI can only write text: it has no tools and cannot take actions.
@@ -901,6 +914,7 @@
 - **Why not those:** An extra endpoint for one number is too much for now. It is the same pattern as the 5 MB upload limit (3.72).
 - **Trade-off:** The two numbers can drift apart if someone changes only one.
 - **Interview line:** "The server decides, and the copy in the UI is only a hint."
+- **Day 18:** The number now decides what counts as "long" and how much is sent. The React copy is called `LONG_DOCUMENT_CHARS`, and the server flag is `documentLong` (see 3.101).
 
 ### 3.94 Choosing a document: a dropdown, a ribbon and a mark ✅
 - **What:** On a new chat a dropdown lists the documents with readable text (scans and old rows are not offered). A ribbon shows "Chatting about ..." with a cut-off warning when needed, and the chat list marks these chats with 📄. The document id goes with the first message only. Questions about documents replace the general suggestion chips.
@@ -917,6 +931,61 @@
 - **Why not those:** Both leave the wiring between the parts untested.
 - **Trade-off:** Mocks can drift from the real API, which is why the robot tests with the real backend stay.
 - **Interview line:** "I test the page that users really see, and I break my own code on purpose to prove the tests can fail."
+
+### 3.96 Chunking: overlapping pieces cut at natural borders ✅
+- **What:** A long text is cut into pieces of about 1,000 characters. Each piece repeats the last 150 characters of the one before. A piece ends at a paragraph break, else at the end of a sentence, else at a space (in its last 30%), and never in the middle of an emoji. A chunk is only a start and an end position in the text, it is not a copy.
+- **Why we chose it:** A piece this small is specific enough to match a question, and big enough to hold a whole thought. The overlap keeps an answer that sits on the border of two pieces. Positions instead of copies are cheap, and they let us glue neighbouring pieces back together without repeating text.
+- **Alternatives:** Fixed pieces without overlap, one piece per page, one piece per paragraph or sentence, or much bigger pieces (about 4,000 characters).
+- **Why not those:** Without overlap an answer on a border is lost. Pages differ a lot in size and we do not keep page numbers yet. PDF text has unreliable paragraph breaks. Big pieces waste the budget on text that has nothing to do with the question.
+- **Trade-off:** The size 1,000 and the overlap 150 are sensible guesses, not tuned with real questions.
+- **Interview line:** "I cut at natural borders with a little overlap, and a chunk is just a pair of positions, so merging neighbours never repeats text."
+
+### 3.97 Ranking chunks with BM25 keyword search ✅
+- **What:** The question and every chunk are lower-cased and split into words, and very common words (the, is, of) are dropped. A chunk scores higher when it contains words of the question, rare words count much more than common ones (IDF), repeating a word helps with diminishing returns, and a longer chunk is slightly penalised. This is the BM25 formula, and it runs in memory in a few milliseconds.
+- **Why we chose it:** It is a classic that works well, needs no extra service, is deterministic, can be explained in an interview, and can be tested in plain Java without Spring, a database or an AI.
+- **Alternatives:** Embeddings (search by meaning) with a vector store, MySQL FULLTEXT search, Lucene or Elasticsearch, asking the AI to pick the pages, or a simple word count.
+- **Why not those:** Embeddings need an embedding model and a place to store vectors (the free AI service we use offers none). MySQL FULLTEXT only exists in MySQL, so our H2 tests could not run it. Lucene or Elasticsearch is heavy for one document at a time. Asking the AI costs a whole extra call for every question. A plain word count favours long chunks and common words.
+- **Honest weakness:** It matches words, not meaning. "price" will not find "cost", and plurals or word forms are not matched (no stemming). It works best when the question uses words from the document.
+- **Interview line:** "I started with BM25 because it is simple, fast and testable, and I know exactly where it fails, which is the reason to add embeddings next."
+
+### 3.98 Chunk at question time, store nothing ✅
+- **What:** For each question about a long document the full text is loaded (it already was on Day 17), cut into chunks and scored in memory. Nothing about chunks is stored in the database.
+- **Why we chose it:** There is no new table, no migration, no work to fill it for old documents, and nothing to keep in step when a document is deleted. With the 200-page limit the text is a few hundred kilobytes, so it takes milliseconds.
+- **Alternatives:** A chunks table filled at upload (with a backfill for old documents), stored embeddings, or a search index.
+- **Why not those:** More moving parts for no gain today. Storing chunks starts to pay off when we add embeddings, because computing them is expensive and must be done once.
+- **Trade-off:** The same work is repeated for every question, and it grows with the length of the document.
+- **Interview line:** "I did not build an index before I needed one. The moment I add embeddings, storing chunks becomes the right design."
+
+### 3.99 Which parts the AI gets ✅
+- **What:** A short document (up to `app.ai.max-document-chars`) is sent whole. For a long one: the first chunk always, then the best-scoring chunks until the budget (about 12,000 characters) is used, then the neighbours of the best chunks if there is room. They are sent in document order, chunks that touch are merged without repeating text, and gaps are marked with [...]. If the question has no useful words (for example "summarize this"), chunks spread evenly over the whole document are sent. The prompt says the AI sees excerpts and must answer "I could not find it in the parts I can see" instead of claiming the document does not contain it.
+- **Why we chose it:** The first chunk gives title and introduction. Neighbours give the context around an answer. Document order keeps the text readable. An even spread lets a summary see the whole document. The honesty rule stops a wrong "it is not in the document".
+- **Alternatives:** Only the best few chunks, always sending as much as fits, or a multi-step summary (summarise parts, then summarise the summaries).
+- **Why not those:** The best few chunks alone lack context. A multi-step summary needs many AI calls, which costs time and hits the free tier limits.
+- **Trade-off:** A summary of a long document is based on a sample (about 11,000 of 27,000 characters in our test file), not on all of it.
+- **Interview line:** "The AI gets what matches the question, the beginning for context, and a clear statement that it only sees excerpts, so it can say what it could not find."
+
+### 3.100 Follow-up questions use the last two questions ✅
+- **What:** The search uses the words of the last two questions together.
+- **Why we chose it:** "Can you repeat that?" says nothing about the document, but the question before it does. A test proves that without this the right part is not sent.
+- **Alternatives:** Only the last question, the whole conversation, or letting the AI rewrite the question first.
+- **Why not those:** Only the last question fails for follow-ups. The whole conversation fills the search with old topics. Rewriting costs an extra AI call per question.
+- **Trade-off:** After a change of topic, the words of the old question still pull in old parts for one more question.
+- **Interview line:** "A follow-up is a question about the conversation, not only about the document, so the search looks at the last two questions."
+
+### 3.101 The "long document" flag and its wording ✅
+- **What:** The API returns `documentLong` (true when the document is longer than `app.ai.max-document-chars`). It replaces `documentTruncated`. The screen now says that a long document is searched and that DocMind reads the parts that match the question. The React copy of the number is called `LONG_DOCUMENT_CHARS` (see 3.93).
+- **Why we chose it:** Nothing is cut off any more, so the old name would be wrong. The wording matters: people must not think part of the document is ignored for every question.
+- **Alternatives:** Keep the old name, show no note, or show exactly which parts were used.
+- **Why not those:** The old name would lie. No note hides a real limit (keyword search can miss things). Showing the parts used is the next step (sources, Day 19) and needs backend work first.
+- **Trade-off:** Renaming a field is a breaking change. Backend and frontend live in one repository, so we pushed the backend first and the screen caught up in the next commit.
+- **Interview line:** "A name should say what is true. When the behaviour changed from cut to search, I renamed the flag and the wording together."
+
+### 3.102 Testing the search ✅
+- **What:** Plain Java unit tests for chunking (7) and ranking and selection (9), prompt tests, chat service tests with a mocked AI (a long document sends the right excerpt, a follow-up uses the previous question), one real-HTTP test where the fake AI reports which words of the question it received, and a robot test that asks for the secret word on the last page of `long.pdf`. I also broke the code on purpose to see the tests fail.
+- **Why we chose it:** Bad search is silent: the AI still answers, only worse. A known answer ("KANGAROO") at a known place turns a quality problem into a failing test. The fake AI lists the words it found, so the feature can be seen even without a real AI.
+- **Alternatives:** Judge by feel with the real AI, or build a bigger set of questions and score it.
+- **Why not those:** Feel does not repeat. A larger scored set is a good later step once we tune the settings.
+- **Interview line:** "I made search quality testable: a known answer at a known position, and a check that the right words reach the AI."
 
 ---
 
@@ -1048,6 +1117,18 @@ A: Today I cut it at a limit, tell the AI that it was cut, and show a warning to
 **Q: What happens to a chat when its document is deleted?**
 A: The chat stays but becomes an ordinary chat. A foreign key blocks the delete, so I set the link to null first. A test covers it, and I know the two steps are not one transaction.
 
+**Q: How does DocMind answer questions about a document that is too long for the AI?**
+A: A short document is sent whole. A long one is cut into overlapping chunks of about 1,000 characters, the chunks are ranked against the question with BM25 keyword search, and the best ones are sent together with the first chunk and the neighbours of the best matches. They go in document order with gaps marked, and the AI is told it only sees excerpts.
+
+**Q: Why keyword search and not embeddings?**
+A: Embeddings need an embedding model and a place to store vectors, which means extra infrastructure and cost. BM25 runs in memory in milliseconds, needs nothing extra, and I can test it in plain Java. Its weakness is that it matches words, not meaning, and that is the reason embeddings are my next step.
+
+**Q: How do you test search quality?**
+A: I put a known answer at a known position, for example a secret word on the last page of a long PDF, and check that it reaches the AI. Unit tests cover the chunking and the ranking, a real-HTTP test uses a fake AI that reports which words of the question it received, and a robot test checks it in the browser. Breaking the code on purpose shows that the tests can fail.
+
+**Q: What are the weaknesses of your approach, and what would you do next?**
+A: It does not understand synonyms, it keeps no page numbers so it cannot show sources, a summary of a very long document is based on a sample, and the chunk size is a guess. Next: show sources with page numbers, add embeddings for meaning, and build a small set of test questions to tune the settings.
+
 ---
 
 ## 5. Challenges I Faced and Fixed (add as you go)
@@ -1106,6 +1187,8 @@ A: The chat stays but becomes an ordinary chat. A foreign key blocks the delete,
 | 16 | `401 Bearer token is malformed` from curl | `$token` was empty because I had opened a new PowerShell window | Logged in again and checked `$token.Length` before running the uploads |
 | 17 | `Error Code: 1054. Unknown column 'd.char_count'` when running the UPDATE in MySQL Workbench | The new columns are added by Hibernate when the backend starts, and my backend was still the old version | Restarted the backend with the Day 17 code, checked both columns with `SHOW COLUMNS`, then ran the UPDATE to fill `char_count` for old documents (`ddl-auto=update` adds columns but never fills them) |
 | 17 | The new code in `ChatPage.jsx` ran, but nothing changed on the screen | Only 10 of the 12 edits were made. The ribbon and the dropdown were never added, so the new values were computed but never shown | Added the two missing edits. Lint ("defined but never used") and the new ChatPage tests point to this kind of gap |
+| 18 | I could not find `documentLong` in the Network tab | I was looking at the `messages` request. The field is in the `conversations` response | Filtered Fetch/XHR by `conversations`, reloaded the page, and opened the Response tab |
+| 18 | `ReferenceError: book is not defined` in `ChatPage.test.jsx` | One of the four edits (the line that creates the test document `book`) was missed. A missing name only fails the test that uses it, so the other 62 tests passed | Added the `const book = ...` line and ran all tests again (63 green) |
 
 ---
 
@@ -1145,3 +1228,4 @@ Copy this each time we add a tool:
 | 14 | Added routing, route guard, responsive drawer, UI states, and component test decisions; settled the styling decision (3.18); updated known limitations |
 | 16 | Marked PDFBox as in use (3.15); added extraction timing, check order, 422 handling, NO_TEXT, separate text table, VARCHAR status, status badge and Playwright decisions; added error-message hiding (3.80); updated known limitations; added 4 interview questions and 5 challenges |
 | 17 | Chat with a document: version 1 of 3.16 done; added decisions 3.89 to 3.95 (document link, the cut text, prompt injection, deleting documents, the cut-off setting, the picker, testing the chat page); updated 3.36, 3.52, 3.85, 3.88 and row 15; added 4 interview questions and 2 challenges |
+| 18 | Chat with a long document: versions 2 of 3.16 done (chunking, BM25, selection, follow-up questions); added decisions 3.96 to 3.102; updated rows 15, 90 and 93 and sections 3.16, 3.36, 3.90 and 3.93; added 4 interview questions and 2 challenges |

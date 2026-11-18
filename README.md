@@ -16,10 +16,11 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - [x] Streaming AI replies with a Stop button
 - [x] Real page addresses (`/login`, `/register`, `/chat`), guarded routes, and a phone-friendly layout
 - [x] PDF upload, private to each user, with the text read on the server: page count, preview, and a status (text ready, no text found)
-- [x] Chat about a PDF: pick one of your documents when you start a chat, and the AI answers from its text (the first 12,000 characters, with a clear warning when it is cut)
+- [x] Chat about a PDF: pick one of your documents when you start a chat, and the AI answers from its text. Short documents are sent whole. Long documents are cut into chunks and searched (BM25 keyword search), so the AI gets the parts that match each question
 
 ### Planned
-- [ ] Smarter chat with long PDFs (chunks and retrieval)
+- [ ] Sources: show which parts of the document an answer is based on
+- [ ] Search by meaning (embeddings) for questions that use other words than the document
 - [ ] Document summarizer
 - [ ] AI email generator
 - [ ] Resume checker
@@ -56,7 +57,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 | `GET /api/auth/me` | token | Current user |
 | `POST /api/chat` | token | Send a message, get the AI reply. For a new chat the body may contain `documentId` to chat about one of your documents |
 | `POST /api/chat/stream` | token | The same, but the reply arrives as a stream of events |
-| `GET /api/conversations` | token | My chats (with the document name and whether its text was cut, if the chat is about a document) |
+| `GET /api/conversations` | token | My chats (with the document name and whether the document is long, if the chat is about a document) |
 | `GET /api/conversations/{id}/messages` | token | Messages of one of my chats |
 | `PATCH /api/conversations/{id}` | token | Rename my chat |
 | `DELETE /api/conversations/{id}` | token | Delete my chat |
@@ -73,6 +74,7 @@ An AI-powered workspace for students, developers, and office teams. Sign up, cha
 - Uploads: size limit, file type checked by content, random file names, per-user ownership
 - Uploads are checked by their first bytes, then parsed with a page cap. Unreadable files get a clean 422, and error replies never show stack traces, SQL or exception names
 - Chat documents: only your own documents can be attached (404 otherwise), and document text is treated as untrusted data (prompt injection is reduced, with a test that the text cannot break out of its block)
+- Document search runs on the server with no extra service, and the text of a document is only read for its owner
 
 ## Run it locally
 
@@ -97,7 +99,7 @@ $b = New-Object byte[] 48; [Security.Cryptography.RandomNumberGenerator]::Create
 ```
 
 - the AI: keep `app.ai.provider=fake` to run with no key, or set `groq` with your own API key and model
-- optional: `app.ai.max-document-chars` (default 12000) sets how much of a document the AI reads with each question
+- optional: `app.ai.max-document-chars` (default 12000) sets how much document text the AI gets with each question. Shorter documents are sent whole, longer ones are searched for the best-matching parts
 
 **3. Start the backend:**
 
@@ -120,10 +122,10 @@ Open http://localhost:5173, create an account, and start chatting. Upload a PDF 
 
 ```powershell
 cd backend
-.\mvnw test        # 50 tests: unit tests, PDF extractor and prompt tests, real-HTTP integration tests (in-memory database, fake AI)
+.\mvnw test        # 68 tests: unit tests, PDF extractor, chunking and search tests, real-HTTP integration tests (in-memory database, fake AI)
 
 cd ..\frontend
-npm test           # 62 Vitest tests (request helper, stream reader, upload, documents page, chat page, routes)
+npm test           # 63 Vitest tests (request helper, stream reader, upload, documents page, chat page, routes)
 npm run e2e        # 8 Playwright browser tests (needs the backend and the frontend running)
 ```
 
@@ -157,7 +159,8 @@ docs/      learning-log.md and tech-decisions.md
 | 15 | PDF upload with checks, private storage and a documents page | ✅ |
 | 16 | Read the text of PDFs (PDFBox), status, page count, preview, browser tests | ✅ |
 | 17 | Chat with a PDF (version 1: the first part of the text, with a warning) | ✅ |
-| 18 | Smarter chat with long PDFs (chunks and retrieval) | 🔜 Next |
+| 18 | Smarter chat with long PDFs (chunks and keyword search) | ✅ |
+| 19 | Sources: show which parts of the document an answer is based on | 🔜 Next |
 
 ## Roadmap
-Smarter chat with long PDFs (chunks and retrieval), then summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.
+Sources for answers and search by meaning (embeddings), then summarizer and email generator, resume checker and spam detector, and finally rate limiting, refresh tokens, migrations, Docker, CI, and deployment.
