@@ -9,8 +9,9 @@ final class PromptBuilder {
 
     // excerpts: true when documentText is only a selection of a long document
     static String withDocument(String basePrompt, String documentText, boolean excerpts) {
-        // The text must not be able to close the document block and "escape" from it
-        String text = documentText.replaceAll("(?i)</document", "< /document");
+        // A page break becomes an ordinary line break. The text must not be able to close the
+        // document block and "escape" from it.
+        String text = documentText.replace('\f', '\n').replaceAll("(?i)</document", "< /document");
 
         StringBuilder prompt = new StringBuilder(basePrompt);
         prompt.append("\n\nThe user attached a document and is asking about it. Rules:\n");

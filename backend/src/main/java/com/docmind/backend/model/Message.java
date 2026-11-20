@@ -40,6 +40,11 @@ public class Message {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    // Which parts of a document this answer was based on: "WHOLE", "EXCERPTS" or "PAGES 1-2,14-14".
+    // null when the message has nothing to do with a document.
+    @Column(length = 1000)
+    private String sources;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
 

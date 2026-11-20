@@ -20,6 +20,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -363,5 +364,62 @@ class DocumentApiTest {
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
         return http.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    // ---------- sources ----------
+
+    // 6 pages. The secret word is on the last page. The text is long enough to be searched, not sent whole.
+    private static byte[] longPdfWithTheSecretOnTheLastPage() {
+        String filler = "The weather is mild and the trains run on time. ".repeat(60); // about 2,900 characters
+        return TestPdfs.withPages(filler, filler, filler, filler, filler,
+                "The final secret word is KANGAROO. " + filler);
+    }
+
+    @Test
+    void anAnswerAboutALongDocumentTellsWhichPagesItIsBasedOn() throws Exception {
+        String token = registerAndLogin();
+        long documentId = uploadAndGetId(token, "long.pdf", longPdfWithTheSecretOnTheLastPage());
+
+        HttpResponse<String> reply = postJson("/api/chat",
+                "{\"message\":\"What is the final secret word?\",\"documentId\":" + documentId + "}", token);
+
+        assertThat(reply.statusCode()).isEqualTo(200);
+        assertThat((String) JsonPath.read(reply.body(), "$.sources.mode")).isEqualTo("PAGES");
+        List<Integer> lastPages = JsonPath.read(reply.body(), "$.sources.pages[*].to");
+        assertThat(lastPages).contains(6); // the secret word is on page 6
+        long conversationId = ((Number) JsonPath.read(reply.body(), "$.conversationId")).longValue();
+
+        // The sources are saved with the answer, so they are still there after a reload
+        String messages = send("GET", "/api/conversations/" + conversationId + "/messages", token).body();
+        assertThat((String) JsonPath.read(messages, "$[1].sources.mode")).isEqualTo("PAGES");
+        assertThat((Object) JsonPath.read(messages, "$[0].sources")).isNull(); // a question has no sources
+    }
+
+    @Test
+    void anOrdinaryAnswerHasNoSources() throws Exception {
+        String token = registerAndLogin();
+
+        HttpResponse<String> reply = postJson("/api/chat", "{\"message\":\"Hello\"}", token);
+
+        assertThat(reply.statusCode()).isEqualTo(200);
+        assertThat((Object) JsonPath.read(reply.body(), "$.sources")).isNull();
+    }
+
+    @Test
+    void theStreamSendsTheSourcesAfterTheChatIdAndBeforeTheFirstWord() throws Exception {
+        String token = registerAndLogin();
+        long documentId = uploadAndGetId(token, "long.pdf", longPdfWithTheSecretOnTheLastPage());
+
+        HttpResponse<String> response = postJson("/api/chat/stream",
+                "{\"message\":\"What is the final secret word?\",\"documentId\":" + documentId + "}", token);
+
+        String body = response.body();
+        int meta = body.indexOf("event:meta");
+        int sources = body.indexOf("event:sources");
+        int firstWord = body.indexOf("event:token");
+        assertThat(meta).isGreaterThanOrEqualTo(0);
+        assertThat(sources).isGreaterThan(meta);
+        assertThat(firstWord).isGreaterThan(sources);
+        assertThat(body).contains("\"mode\":\"PAGES\"");
     }
 }

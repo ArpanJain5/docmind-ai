@@ -113,4 +113,23 @@ class DocumentRetrieverTest {
 
         assertThat(words).containsExactly("secret", "word");
     }
+
+    @Test
+    void theSelectionRemembersWhereItsTextComesFrom() {
+        String text = filler(400) + "The final secret word is KANGAROO. " + filler(50);
+
+        DocumentRetriever.Selection selection =
+                DocumentRetriever.select(text, "What is the final secret word?", BUDGET);
+
+        int secret = text.indexOf("KANGAROO");
+        assertThat(selection.runs()).anyMatch(run -> run.start() <= secret && secret < run.end());
+        assertThat(selection.runs().get(0).start()).isZero(); // the beginning is always included
+    }
+
+    @Test
+    void aWholeDocumentIsOneRun() {
+        DocumentRetriever.Selection selection = DocumentRetriever.select("short", "anything", BUDGET);
+
+        assertThat(selection.runs()).containsExactly(new DocumentRetriever.Run(0, 5));
+    }
 }

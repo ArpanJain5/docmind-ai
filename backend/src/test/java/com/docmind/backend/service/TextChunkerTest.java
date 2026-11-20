@@ -89,4 +89,14 @@ class TextChunkerTest {
         assertThat(chunks.size()).isGreaterThanOrEqualTo(5);
         assertThat(chunks.get(chunks.size() - 1).end()).isEqualTo(5000);
     }
+
+    @Test
+    void chunksPreferToEndAtAPageBreak() {
+        String page = "a ".repeat(400); // a page of 800 characters
+        String text = page + "\f" + page + "\f" + page + "\f";
+
+        List<TextChunker.Chunk> chunks = TextChunker.split(text, 1000, 150);
+
+        assertThat(text.charAt(chunks.get(0).end() - 1)).isEqualTo('\f');
+    }
 }

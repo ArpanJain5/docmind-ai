@@ -30,8 +30,13 @@ final class DocumentRetriever {
             "can", "could", "would", "should", "will", "there", "their", "about", "me", "my", "you", "your",
             "i", "we", "they", "he", "she", "has", "have", "had", "tell", "please", "any", "some", "all");
 
+    // A piece of the document, from start (included) to end (not included), counted in characters
+    record Run(int start, int end) {
+    }
+
     // text: the text the AI will get. whole: true when it is the complete document.
-    record Selection(boolean whole, String text, int chunksInDocument, int chunksUsed) {
+    // runs: where in the document the text comes from (used to tell which pages)
+    record Selection(boolean whole, String text, int chunksInDocument, int chunksUsed, List<Run> runs) {
     }
 
     private DocumentRetriever() {
@@ -39,7 +44,7 @@ final class DocumentRetriever {
 
     static Selection select(String documentText, String question, int budgetChars) {
         if (documentText.length() <= budgetChars) {
-            return new Selection(true, documentText, 1, 1);
+            return new Selection(true, documentText, 1, 1, List.of(new Run(0, documentText.length())));
         }
 
         List<TextChunker.Chunk> chunks = TextChunker.split(documentText, CHUNK_SIZE, CHUNK_OVERLAP);
@@ -78,7 +83,8 @@ final class DocumentRetriever {
             }
         }
 
-        return new Selection(false, join(documentText, chunks, selected), chunks.size(), selected.size());
+        List<Run> runs = mergeRuns(chunks, selected);
+        return new Selection(false, join(documentText, runs), chunks.size(), selected.size(), runs);
     }
 
     private static void add(int index, List<TextChunker.Chunk> chunks, Set<Integer> selected, int[] used,
@@ -93,10 +99,9 @@ final class DocumentRetriever {
         }
     }
 
-    // The chosen chunks in document order. Chunks that touch or overlap become one piece, and
-    // pieces with a gap between them are separated by "[...]".
-    private static String join(String text, List<TextChunker.Chunk> chunks, Set<Integer> selected) {
-        StringBuilder result = new StringBuilder();
+    // The chosen chunks in document order. Chunks that touch or overlap become one piece (a run).
+    private static List<Run> mergeRuns(List<TextChunker.Chunk> chunks, Set<Integer> selected) {
+        List<Run> runs = new ArrayList<>();
         int runStart = -1;
         int runEnd = -1;
         for (int index : new TreeSet<>(selected)) {
@@ -107,13 +112,25 @@ final class DocumentRetriever {
             } else if (chunk.start() <= runEnd) {
                 runEnd = Math.max(runEnd, chunk.end());
             } else {
-                result.append(text, runStart, runEnd).append("\n[...]\n");
+                runs.add(new Run(runStart, runEnd));
                 runStart = chunk.start();
                 runEnd = chunk.end();
             }
         }
         if (runStart >= 0) {
-            result.append(text, runStart, runEnd);
+            runs.add(new Run(runStart, runEnd));
+        }
+        return runs;
+    }
+
+    // The text of the pieces, with "[...]" between two pieces that have a gap between them
+    private static String join(String text, List<Run> runs) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < runs.size(); i++) {
+            if (i > 0) {
+                result.append("\n[...]\n");
+            }
+            result.append(text, runs.get(i).start(), runs.get(i).end());
         }
         return result.toString();
     }

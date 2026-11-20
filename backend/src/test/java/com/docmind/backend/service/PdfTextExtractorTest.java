@@ -57,4 +57,23 @@ class PdfTextExtractorTest {
                 .isInstanceOfSatisfying(ResponseStatusException.class,
                         e -> assertThat(e.getStatusCode().value()).isEqualTo(422));
     }
+
+    @Test
+    void everyPageEndsWithAPageBreak() {
+        PdfTextExtractor.Extracted result =
+                extractor.extract(TestPdfs.withPages("First page text", "Second page text"));
+
+        String[] pages = result.text().split("\f", -1);
+        assertThat(pages).hasSize(3); // two pages, and the empty rest after the last break
+        assertThat(pages[0]).contains("First page text");
+        assertThat(pages[1]).contains("Second page text");
+    }
+
+    @Test
+    void aBlankPageKeepsItsPlaceSoPageNumbersStayRight() {
+        PdfTextExtractor.Extracted result = extractor.extract(TestPdfs.withPages("", "Second page text"));
+
+        PageMap pages = new PageMap(result.text());
+        assertThat(pages.pageOf(result.text().indexOf("Second"))).isEqualTo(2);
+    }
 }

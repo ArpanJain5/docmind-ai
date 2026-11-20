@@ -18,6 +18,8 @@ public class PdfTextExtractor {
     // A small file can still hold thousands of pages, so we cap them
     static final int MAX_PAGES = 200;
 
+    // text: the text of all pages, with a page break character after EVERY page (also an empty one),
+    // so a position in the text can always be turned into a page number (see PageMap)
     public record Extracted(int pageCount, String text) {
     }
 
@@ -30,8 +32,16 @@ public class PdfTextExtractor {
 
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setLineSeparator("\n"); // the same on Windows and Linux
-            String text = stripper.getText(pdf).replace("\u0000", "").replace("\r\n", "\n").replace("\r", "\n").strip();
-            return new Extracted(pages, text);
+            stripper.setPageEnd("");         // we add our own page break below
+
+            // One page at a time, so we always know where each page ends
+            StringBuilder text = new StringBuilder();
+            for (int page = 1; page <= pages; page++) {
+                stripper.setStartPage(page);
+                stripper.setEndPage(page);
+                text.append(clean(stripper.getText(pdf))).append(PageMap.PAGE_BREAK);
+            }
+            return new Extracted(pages, text.toString());
 
         } catch (ResponseStatusException e) {
             throw e; // our own "too many pages" answer
@@ -41,6 +51,16 @@ public class PdfTextExtractor {
             // A broken or hostile file can fail in many ways inside the library
             throw unreadable("That file is not a readable PDF");
         }
+    }
+
+    // Same line endings everywhere, no empty characters, and no page break characters of the PDF's own
+    // (only OUR page breaks may count as page ends)
+    private static String clean(String pageText) {
+        return pageText.replace("\u0000", "")
+                .replace(PageMap.PAGE_BREAK, ' ')
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .strip();
     }
 
     private static ResponseStatusException unreadable(String reason) {

@@ -54,7 +54,11 @@ public class ChatController {
         return chatService.chat(userId, request.conversationId(), request.documentId(), message);
     }
 
-    // The reply piece by piece, as Server-Sent Events
+    // The reply piece by piece, as Server-Sent Events:
+    //   meta     the id of the chat
+    //   sources  which parts of the document the answer is based on (only for a chat about a document)
+    //   token    one piece of the reply, many times
+    //   done     the reply is complete (or "error" if it failed)
     @PostMapping("/stream")
     public SseEmitter stream(@AuthenticationPrincipal Jwt jwt, @RequestBody ChatRequest request) {
         String message = requireValidMessage(request);
@@ -70,8 +74,9 @@ public class ChatController {
         streamExecutor.execute(() -> {
             try {
                 chatService.chatStreaming(userId, request.conversationId(), request.documentId(), message,
-                    id -> send(emitter, "meta", Map.of("conversationId", id)),
-                    piece -> send(emitter, "token", Map.of("text", piece)));
+                        id -> send(emitter, "meta", Map.of("conversationId", id)),
+                        sources -> send(emitter, "sources", sources),
+                        piece -> send(emitter, "token", Map.of("text", piece)));
                 send(emitter, "done", Map.of());
             } catch (Exception e) {
                 log.warn("Streaming chat failed: {}", e.getMessage());

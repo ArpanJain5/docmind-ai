@@ -4,6 +4,7 @@ import com.docmind.backend.ai.AiException;
 import com.docmind.backend.ai.AiMessage;
 import com.docmind.backend.ai.AiService;
 import com.docmind.backend.dto.ChatResponse;
+import com.docmind.backend.dto.SourceInfo;
 import com.docmind.backend.model.Conversation;
 import com.docmind.backend.model.Message;
 import com.docmind.backend.model.Role;
@@ -375,5 +376,90 @@ class ChatServiceTest {
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
         verify(aiService).complete(prompt.capture(), anyList());
         assertThat(prompt.getValue()).contains("KANGAROO");
+    }
+
+    // ---------- sources: which parts of the document an answer is based on ----------
+
+    // 14 pages of filler text with a page break after each one. The secret word is on the last page.
+    private static String longTextWithPages() {
+        String filler = "The weather is mild and the trains run on time. ".repeat(60); // about 2,900 characters
+        StringBuilder text = new StringBuilder();
+        for (int page = 1; page <= 13; page++) {
+            text.append(filler).append('\f');
+        }
+        text.append("The final secret word is KANGAROO. ").append(filler).append('\f');
+        return text.toString();
+    }
+
+    private void documentWithText(String text) {
+        when(documentRepository.findByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of(readableDocument(3L)));
+        when(documentRepository.findTextByIdAndUserId(3L, USER_ID)).thenReturn(Optional.of(text));
+    }
+
+    @Test
+    void aStreamedAnswerAboutALongDocumentReportsTheSourcePagesBeforeTheFirstWord() {
+        documentWithText(longTextWithPages());
+        when(aiService.stream(anyString(), anyList(), any())).thenAnswer(invocation -> {
+            Consumer<String> onToken = invocation.getArgument(2);
+            onToken.accept("KANGAROO");
+            return "KANGAROO";
+        });
+        List<String> events = new ArrayList<>();
+        List<SourceInfo> reported = new ArrayList<>();
+
+        chatService.chatStreaming(USER_ID, null, 3L, "What is the final secret word?",
+                id -> events.add("meta"),
+                sources -> {
+                    events.add("sources");
+                    reported.add(sources);
+                },
+                piece -> events.add("token"));
+
+        assertThat(events).containsExactly("meta", "sources", "token");
+
+        SourceInfo sources = reported.get(0);
+        assertThat(sources.mode()).isEqualTo(SourceInfo.Mode.PAGES);
+        assertThat(sources.pages().get(0)).isEqualTo(new SourceInfo.PageRange(1, 1)); // the first page is always used
+        assertThat(sources.pages()).anyMatch(range -> range.from() <= 14 && range.to() >= 14);
+    }
+
+    @Test
+    void theSourcesAreSavedWithTheAnswer() {
+        documentWithText(longTextWithPages());
+
+        ChatResponse response = chatService.chat(USER_ID, null, 3L, "What is the final secret word?");
+
+        Message answer = savedMessages.get(savedMessages.size() - 1);
+        assertThat(answer.getRole()).isEqualTo(Role.ASSISTANT);
+        assertThat(answer.getSources()).startsWith("PAGES 1-1").contains("14");
+        assertThat(response.sources()).isEqualTo(SourceInfo.fromStorage(answer.getSources()));
+    }
+
+    @Test
+    void aShortDocumentIsReportedAsWhole() {
+        documentWithText("The sky is green.\f");
+
+        ChatResponse response = chatService.chat(USER_ID, null, 3L, "What colour is the sky?");
+
+        assertThat(response.sources().mode()).isEqualTo(SourceInfo.Mode.WHOLE);
+        assertThat(savedMessages.get(savedMessages.size() - 1).getSources()).isEqualTo("WHOLE");
+    }
+
+    @Test
+    void aLongDocumentWithoutPageInformationIsReportedAsExcerpts() {
+        documentWithText(longText()); // like a document uploaded before the page breaks existed
+
+        ChatResponse response = chatService.chat(USER_ID, null, 3L, "What is the final secret word?");
+
+        assertThat(response.sources().mode()).isEqualTo(SourceInfo.Mode.EXCERPTS);
+        assertThat(savedMessages.get(savedMessages.size() - 1).getSources()).isEqualTo("EXCERPTS");
+    }
+
+    @Test
+    void anOrdinaryChatHasNoSources() {
+        ChatResponse response = chatService.chat(USER_ID, null, "Hello");
+
+        assertThat(response.sources()).isNull();
+        assertThat(savedMessages.get(savedMessages.size() - 1).getSources()).isNull();
     }
 }

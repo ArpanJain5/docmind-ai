@@ -6,6 +6,7 @@ import com.docmind.backend.ai.AiService;
 import com.docmind.backend.dto.ChatResponse;
 import com.docmind.backend.dto.ConversationSummary;
 import com.docmind.backend.dto.MessageResponse;
+import com.docmind.backend.dto.SourceInfo;
 import com.docmind.backend.model.Conversation;
 import com.docmind.backend.model.Document;
 import com.docmind.backend.model.DocumentStatus;
@@ -71,6 +72,7 @@ public class ChatService {
     public ChatResponse chat(Long userId, Long conversationId, Long documentId, String userMessage) {
         return converse(userId, conversationId, documentId, userMessage,
                 id -> { },
+                sources -> { },
                 (prompt, history) -> aiService.complete(prompt, history));
     }
 
@@ -80,11 +82,22 @@ public class ChatService {
         return chatStreaming(userId, conversationId, null, userMessage, onConversation, onToken);
     }
 
-    // The reply piece by piece: onConversation gets the chat id first, then onToken gets each piece
+    // The reply piece by piece, without telling the sources
     public ChatResponse chatStreaming(Long userId, Long conversationId, Long documentId, String userMessage,
                                       Consumer<Long> onConversation, Consumer<String> onToken) {
+        return chatStreaming(userId, conversationId, documentId, userMessage,
+                onConversation, sources -> { }, onToken);
+    }
+
+    // The reply piece by piece. First onConversation gets the chat id, then onSources gets the parts of
+    // the document the answer will be based on (only for a chat about a document), then onToken gets
+    // each piece of the reply.
+    public ChatResponse chatStreaming(Long userId, Long conversationId, Long documentId, String userMessage,
+                                      Consumer<Long> onConversation, Consumer<SourceInfo> onSources,
+                                      Consumer<String> onToken) {
         return converse(userId, conversationId, documentId, userMessage,
                 onConversation,
+                onSources,
                 (prompt, history) -> aiService.stream(prompt, history, onToken));
     }
 
@@ -101,8 +114,17 @@ public class ChatService {
         String run(String systemPrompt, List<AiMessage> history);
     }
 
+    // The instructions for the AI, and which parts of the document they contain (null: no document)
+    private record Prompt(String system, SourceInfo sources) {
+    }
+
+    // The reply, and the sources it is based on
+    private record Answer(String reply, SourceInfo sources) {
+    }
+
     private ChatResponse converse(Long userId, Long conversationId, Long documentId, String userMessage,
-                                  Consumer<Long> onConversation, AiCall aiCall) {
+                                  Consumer<Long> onConversation, Consumer<SourceInfo> onSources,
+                                  AiCall aiCall) {
         boolean isNewChat = (conversationId == null);
 
         // Checked first, so a bad document id saves nothing at all
@@ -117,10 +139,10 @@ public class ChatService {
                 messageRepository.save(new Message(conversation, Role.USER, userMessage));
 
         // The slow part. We deliberately do NOT keep a database transaction open during it.
-        String reply;
+        Answer answer;
         try {
             onConversation.accept(conversation.getId());
-            reply = callAi(userId, conversation, aiCall);
+            answer = callAi(userId, conversation, onSources, aiCall);
         } catch (RuntimeException e) {
             // The AI failed, or the browser stopped listening: undo what we saved
             messageRepository.deleteById(savedUserMessage.getId());
@@ -130,9 +152,13 @@ public class ChatService {
             throw e;
         }
 
-        messageRepository.save(new Message(conversation, Role.ASSISTANT, reply));
+        Message reply = new Message(conversation, Role.ASSISTANT, answer.reply());
+        if (answer.sources() != null) {
+            reply.setSources(answer.sources().toStorage()); // so the sources are still there after a reload
+        }
+        messageRepository.save(reply);
 
-        return new ChatResponse(conversation.getId(), reply);
+        return new ChatResponse(conversation.getId(), answer.reply(), answer.sources());
     }
 
     // The document for a NEW chat, or null for an ordinary chat
@@ -159,31 +185,49 @@ public class ChatService {
 
     // The instructions for the AI. For a chat about a document they include the text of the document:
     // all of it when it is short, otherwise the excerpts that match what the person is asking.
-    private String buildSystemPrompt(Long userId, Conversation conversation, String question) {
+    private Prompt buildPrompt(Long userId, Conversation conversation, String question) {
         Long documentId = conversation.getDocumentId();
         if (documentId == null) {
-            return SYSTEM_PROMPT;
+            return new Prompt(SYSTEM_PROMPT, null);
         }
         return documentRepository.findTextByIdAndUserId(documentId, userId)
                 .map(text -> {
                     DocumentRetriever.Selection selection =
                             DocumentRetriever.select(text, question, maxDocumentChars);
-                    return PromptBuilder.withDocument(SYSTEM_PROMPT, selection.text(), !selection.whole());
+                    return new Prompt(
+                            PromptBuilder.withDocument(SYSTEM_PROMPT, selection.text(), !selection.whole()),
+                            sourcesOf(text, selection));
                 })
-                .orElse(SYSTEM_PROMPT);
+                .orElse(new Prompt(SYSTEM_PROMPT, null));
     }
 
-    private String callAi(Long userId, Conversation conversation, AiCall aiCall) {
+    // Which pages did the text we send come from?
+    private static SourceInfo sourcesOf(String documentText, DocumentRetriever.Selection selection) {
+        if (selection.whole()) {
+            return SourceInfo.whole();
+        }
+        PageMap pages = new PageMap(documentText);
+        if (!pages.hasPages()) {
+            return SourceInfo.excerpts(); // an older document: its text has no page information
+        }
+        return SourceInfo.pages(pages.pagesOf(selection.runs()));
+    }
+
+    private Answer callAi(Long userId, Conversation conversation, Consumer<SourceInfo> onSources,
+                          AiCall aiCall) {
         List<Message> all = messageRepository.findByConversationIdOrderByIdAsc(conversation.getId());
         List<Message> recent = all.subList(Math.max(0, all.size() - MAX_HISTORY_MESSAGES), all.size());
         List<AiMessage> history = recent.stream()
                 .map(m -> new AiMessage(m.getRole(), m.getContent()))
                 .toList();
 
-        String systemPrompt = buildSystemPrompt(userId, conversation, recentQuestions(all));
+        Prompt prompt = buildPrompt(userId, conversation, recentQuestions(all));
+        if (prompt.sources() != null) {
+            onSources.accept(prompt.sources()); // before the first word, so the screen can show them early
+        }
 
         try {
-            return aiCall.run(systemPrompt, history);
+            return new Answer(aiCall.run(prompt.system(), history), prompt.sources());
         } catch (AiException e) {
             // 502 = "the service behind me failed". The details stay in our logs.
             throw new ResponseStatusException(

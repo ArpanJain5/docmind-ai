@@ -57,7 +57,8 @@ final class TextChunker {
     // else after a space or line break. Returns -1 when there is none.
     private static int lastBreak(String text, int from, int to) {
         for (int i = to - 1; i > from; i--) {
-            if (text.charAt(i) == '\n' && text.charAt(i - 1) == '\n') {
+            // The end of a page (a page break character) or an empty line
+            if (text.charAt(i) == '\f' || (text.charAt(i) == '\n' && text.charAt(i - 1) == '\n')) {
                 return i + 1;
             }
         }
